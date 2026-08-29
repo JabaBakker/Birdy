@@ -9,6 +9,8 @@ De agent roept dit aan via Bash:
     python /app/agent/gdrive.py download "10 Gezin/Evi/School/x.pdf" --naar /tmp/x.pdf
     python /app/agent/gdrive.py search "kamp"
     python /app/agent/gdrive.py link "10 Gezin/Evi/School/x.pdf"
+    python /app/agent/gdrive.py read "20 Huishouden/Huishoudhandboek"
+    python /app/agent/gdrive.py write-doc "20 Huishouden/Huishoudhandboek" --van /tmp/handboek.txt
 
 Paden zijn relatief aan de hoofdmap (DRIVE_ROOT_FOLDER_ID in .env). Vereist de
 OAuth-koppeling (GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN, zie scripts/google_consent.py).
@@ -184,6 +186,60 @@ def cmd_download(path: str, naar: str) -> None:
     print(f"Gedownload naar: {dest}")
 
 
+def _docs_service():
+    from googleapiclient.discovery import build
+
+    return build("docs", "v1", credentials=google_credentials([DRIVE_SCOPE]), cache_discovery=False)
+
+
+def cmd_read(path: str) -> None:
+    """Tekstinhoud van een bestand printen (Google Docs als platte tekst)."""
+    svc = _service()
+    node = _resolve(svc, path)
+    mime = node["mimeType"]
+    if mime.startswith("application/vnd.google-apps."):
+        data = svc.files().export(fileId=node["id"], mimeType="text/plain").execute()
+    elif mime.startswith("text/") or mime in ("application/json", "text/markdown"):
+        data = svc.files().get_media(fileId=node["id"]).execute()
+    else:
+        sys.exit(f"'{path}' is geen tekstbestand ({mime}) — gebruik download + de Read-tool.")
+    print(data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data)
+
+
+def cmd_write_doc(path: str, van: str) -> None:
+    """Google Doc aanmaken of de volledige inhoud vervangen met de tekst uit een lokaal bestand."""
+    src = Path(van)
+    if not src.exists():
+        sys.exit(f"Lokaal bestand niet gevonden: {van}")
+    text = src.read_text()
+
+    svc = _service()
+    node = _resolve(svc, path, must_exist=False)
+    if node is None:
+        folder_path, _, name = path.replace("\\", "/").rpartition("/")
+        parent = _ensure_folder(svc, folder_path) if folder_path else _root()
+        node = svc.files().create(
+            body={"name": name, "mimeType": "application/vnd.google-apps.document",
+                  "parents": [parent]},
+            fields="id, mimeType, name",
+        ).execute()
+    if node["mimeType"] != "application/vnd.google-apps.document":
+        sys.exit(f"'{path}' bestaat al maar is geen Google Doc ({node['mimeType']}).")
+
+    docs = _docs_service()
+    doc = docs.documents().get(documentId=node["id"], fields="body(content(endIndex))").execute()
+    end = doc["body"]["content"][-1]["endIndex"] - 1  # laatste newline mag niet weg
+    requests = []
+    if end > 1:
+        requests.append({"deleteContentRange": {"range": {"startIndex": 1, "endIndex": end}}})
+    if text.strip():
+        requests.append({"insertText": {"location": {"index": 1}, "text": text.rstrip("\n")}})
+    if requests:
+        docs.documents().batchUpdate(documentId=node["id"], body={"requests": requests}).execute()
+    info = svc.files().get(fileId=node["id"], fields="webViewLink").execute()
+    print(f"Bijgewerkt: {path}\nLink: {info.get('webViewLink', '')}")
+
+
 def cmd_link(path: str) -> None:
     svc = _service()
     node = _resolve(svc, path)
@@ -298,6 +354,11 @@ def main() -> None:
     ps.add_argument("tekst")
     pk = sub.add_parser("link")
     pk.add_argument("pad")
+    pr = sub.add_parser("read")
+    pr.add_argument("pad")
+    pw = sub.add_parser("write-doc")
+    pw.add_argument("pad")
+    pw.add_argument("--van", required=True, help="lokaal tekstbestand met de nieuwe inhoud")
     args = p.parse_args()
 
     if args.cmd == "tree":
@@ -316,6 +377,10 @@ def main() -> None:
         cmd_search(args.tekst)
     elif args.cmd == "link":
         cmd_link(args.pad)
+    elif args.cmd == "read":
+        cmd_read(args.pad)
+    elif args.cmd == "write-doc":
+        cmd_write_doc(args.pad, args.van)
 
 
 if __name__ == "__main__":

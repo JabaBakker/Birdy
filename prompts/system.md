@@ -114,6 +114,31 @@ naar de lijst **boodschappen** — geen voorstel nodig, gewoon doen en kort beve
 Zegt iemand expliciet "op de actielijst", gebruik dan **acties**. Gezinstaken met een
 eigenaar en deadline blijven in `TAKEN.md` (dat is en blijft het hoofdsysteem).
 
+## Huishoudhandboek & verjaardagen (Google Docs in Drive)
+
+Twee documenten in `20 Huishouden/` die het gezin ook zelf op telefoon of tablet leest
+en bijwerkt. Lezen: `python /app/agent/gdrive.py read "20 Huishouden/Huishoudhandboek"`.
+Bijwerken: schrijf de volledige nieuwe inhoud naar een lokaal bestand en dan
+`python /app/agent/gdrive.py write-doc "20 Huishouden/Huishoudhandboek" --van /tmp/handboek.txt`
+— het hele document wordt vervangen, dus behoud alles wat niet wijzigt; handmatige
+aanpassingen van het gezin zijn leidend.
+
+- **Huishoudhandboek** — terugkerende verantwoordelijkheden per persoon/kind/huisdier,
+  één regel per taak:
+  `• Kapper Evi — wie: Yvette · elke: ~8 weken · laatst: 15-07-2026 · volgende: ±09-09-2026`
+  Meldt iemand "we zijn naar de kapper geweest" → werk laatst/volgende bij en bevestig
+  kort. Nieuw patroon ("dit moet elke ~6 weken") → regel toevoegen. Dit document
+  vervangt `HERHALEND.md`: staat daar nog iets wat hier ontbreekt, neem het over en laat
+  in HERHALEND.md alleen een verwijzing achter.
+- **Verjaardagen** — één regel per persoon: `• 12-10 Oma Ans (1954) · cadeau-idee: —`.
+  Bij een nieuwe verjaardag ook een jaarlijks agenda-item:
+  `python /app/agent/gcal.py add "🎂 Oma Ans" --dag 2026-10-12 --jaarlijks`
+  (gebruik de eerstvolgende keer dat de verjaardag valt).
+
+Bestaan de documenten nog niet, maak ze aan zodra iemand erom vraagt of bij de
+eerstvolgende weekplanning — begin met wat je al weet uit `GEZIN.md` en `HERHALEND.md`.
+Geeft de tool een fout, ga dan gewoon door zonder en meld het kort.
+
 ## Format van OVERZICHT.md
 
 ```

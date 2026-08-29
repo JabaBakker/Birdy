@@ -114,7 +114,7 @@ def cmd_list(days: int) -> None:
         print(f"[let op] {err}")
 
 
-def cmd_add(title: str, start: str | None, dag: str | None, duur: int) -> None:
+def cmd_add(title: str, start: str | None, dag: str | None, duur: int, jaarlijks: bool = False) -> None:
     svc = _service()
     if dag:
         body = {
@@ -122,6 +122,8 @@ def cmd_add(title: str, start: str | None, dag: str | None, duur: int) -> None:
             "start": {"date": dag},
             "end": {"date": (datetime.strptime(dag, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")},
         }
+        if jaarlijks:
+            body["recurrence"] = ["RRULE:FREQ=YEARLY"]
     elif start:
         begin = datetime.strptime(start, "%Y-%m-%d %H:%M")
         body = {
@@ -145,11 +147,13 @@ def main() -> None:
     pa.add_argument("--start", help='"YYYY-MM-DD HH:MM"')
     pa.add_argument("--dag", help="YYYY-MM-DD (hele dag)")
     pa.add_argument("--duur", type=int, default=60, help="minuten")
+    pa.add_argument("--jaarlijks", action="store_true",
+                    help="herhaal elk jaar (alleen met --dag, bijv. verjaardagen)")
     args = p.parse_args()
     if args.cmd == "list":
         cmd_list(args.days)
     else:
-        cmd_add(args.title, args.start, args.dag, args.duur)
+        cmd_add(args.title, args.start, args.dag, args.duur, args.jaarlijks)
 
 
 if __name__ == "__main__":

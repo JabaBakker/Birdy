@@ -1,10 +1,15 @@
 Ochtendbriefing — {now}
 
-1. Lees `TAKEN.md`, `GEZIN.md`, `VOORKEUREN.md` en `HERHALEND.md`, en haal de agenda op
-   met `python /app/agent/gcal.py list --days 2`. Zet terugkerende taken die weer aan de
-   beurt zijn in TAKEN.md. Verschuif taken die vandaag/deze week horen naar de
-   juiste sectie, signaleer deadlines die naderen of verstreken zijn, en werk
-   `OVERZICHT.md` bij.
+1. Lees `TAKEN.md`, `GEZIN.md` en `VOORKEUREN.md`, en haal op (fouten = overslaan):
+   - de agenda: `python /app/agent/gcal.py list --days 2`
+   - het handboek: `python /app/agent/gdrive.py read "20 Huishouden/Huishoudhandboek"`
+     → staat er iets met "volgende" op of vóór vandaag, benoem het in de briefing en
+     stel voor er een actie van te maken
+   - de verjaardagen: `python /app/agent/gdrive.py read "20 Huishouden/Verjaardagen"`
+     → verjaardag binnen 7 dagen? Benoem hem en vraag (max 1×) of er een cadeau-actie
+     op de actielijst moet.
+   Verschuif taken die vandaag/deze week horen naar de juiste sectie, signaleer
+   deadlines die naderen of verstreken zijn, en werk `OVERZICHT.md` bij.
 2. Schrijf de dagbriefing voor in de gezinschat. Format, maximaal ~12 regels:
 
 ☀️ Goeiemorgen! DD-MM
