@@ -120,8 +120,19 @@ async def amain() -> None:
         from .slack_adapter import SlackAdapter
         adapters.append(SlackAdapter(cfg, brain, work_lock))
 
+    started = []
     for adapter in adapters:
-        await adapter.start()
+        try:
+            await adapter.start()
+            started.append(adapter)
+        except Exception:
+            log.exception(
+                "adapter %s start niet (checkt tokens in .env) — ik draai door met de rest",
+                type(adapter).__name__,
+            )
+    adapters = started
+    if not adapters:
+        raise SystemExit("Geen enkele adapter kon starten — check de tokens in .env")
     log.info(
         "%s draait. adapters=%s digest=%s budget=$%.2f/dag",
         cfg.agent_name, [type(a).__name__ for a in adapters],
