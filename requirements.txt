@@ -1,0 +1,7 @@
+claude-agent-sdk>=0.2.0
+python-telegram-bot>=21.0
+google-api-python-client>=2.100
+google-auth>=2.20
+requests>=2.31
+icalendar>=5.0
+recurring-ical-events>=2.1

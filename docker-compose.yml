@@ -1,0 +1,11 @@
+services:
+  fien:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./workspace:/data/workspace
+      - fien-claude-home:/root/.claude
+
+volumes:
+  fien-claude-home:
