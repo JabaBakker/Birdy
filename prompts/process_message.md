@@ -1,14 +1,16 @@
 Nieuw bericht — {now}
 Van: {sender}
 Tekst: {text}
-Foto: {photo}
+Bijlage(n): {photo}
 
 Verwerk dit bericht:
 
-1. Lees `GEZIN.md`, `TAKEN.md` en `VOORKEUREN.md`. Is er een foto, lees die dan met de
-   Read-tool en haal er álle taken, data en afspraken uit (schoolbrieven bevatten er
-   vaak meerdere). Let op signalen voor `VOORKEUREN.md` ("voortaan graag…") en
-   `HERHALEND.md` ("dit komt elke … terug") en verwerk die daar.
+1. Lees `GEZIN.md`, `TAKEN.md` en `VOORKEUREN.md`. Is er een bijlage (foto of document),
+   lees die dan met de Read-tool en haal er álle taken, data en afspraken uit
+   (schoolbrieven bevatten er vaak meerdere); volg bij documenten de archiveer-werkwijze
+   uit je instructies (voorstel → bevestiging → archiveren in Drive). Let op signalen
+   voor `VOORKEUREN.md` ("voortaan graag…") en `HERHALEND.md` ("dit komt elke … terug")
+   en verwerk die daar.
 2. Werk `TAKEN.md` bij: nieuwe taken (eigenaar + deadline!), afvinken wat klaar gemeld
    wordt, aanvullen wat verduidelijkt wordt. Nieuwe weetjes over het gezin → `GEZIN.md`.
 3. Werk `OVERZICHT.md` bij en zet één logregel in het journaal van vandaag.

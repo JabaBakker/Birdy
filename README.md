@@ -1,86 +1,102 @@
-# Fien — gezinsassistent
+# Birdy — gezinsassistent
 
 Een zelf-gehoste gezins-agent die de mentale last van het gezinsleven overneemt.
-Jullie appen of fotograferen alles naar één Telegram-chat; Fien maakt er taken van met
-een **eigenaar en een deadline**, geeft elke ochtend een dagbriefing, plant zondagavond
-de week vooruit, en pakt dagelijks één taak zelf op (uitzoekwerk, concepten) — zonder
-ooit iets extern te versturen.
+Jullie appen of fotograferen alles naar de chat; Birdy maakt er taken van met een
+**eigenaar en een deadline**, archiveert documenten in de gezamenlijke Drive-map,
+zet data in de agenda, beheert de boodschappenlijst, geeft elke ochtend een
+dagbriefing, plant zondagavond de week vooruit, en pakt dagelijks één taak zelf op
+(uitzoekwerk, concepten) — zonder ooit iets extern te versturen.
 
-## Wat je nodig hebt
+**Kanalen:** Slack (2.0, aanbevolen) en/of Telegram (1.0, vervalt na de overgang).
+Beide via uitgaande verbindingen — geen open poorten op de server.
 
-1. **Een Telegram-bot** (2 minuten): open Telegram, zoek `@BotFather`, stuur `/newbot`,
-   kies een naam (bijv. "Fien") en een gebruikersnaam (bijv. `jullie_fien_bot`).
-   BotFather geeft een token (`123456:ABC-...`) — dat gaat in `.env`.
-   Stuur BotFather ook `/setprivacy` → kies je bot → **Disable**, anders ziet de bot
-   groepsberichten niet.
-2. **Een gezinsgroep**: maak een Telegram-groep met jou, je vrouw en de bot.
-3. De server + Anthropic API-key die je al hebt.
+## Principe: code hier, data en secrets op de server
+
+- Deze repo bevat alleen **code en prompts**. Bron van waarheid = git.
+- `workspace/` (gezinsdata, eigen git-historie) en `.env` (secrets) leven alleen op
+  de server en komen nooit in deze repo. `workspace-template/` is het startsjabloon
+  voor een verse installatie: `cp -R workspace-template workspace`.
+- Documenten, agenda en lijstjes leven in Google Drive, Google Calendar en Todoist —
+  Birdy is de manager, niet de database.
 
 ## Installeren (op de server)
 
 ```bash
-cd /root && unzip family-agent.zip && cd family-agent
+cd /root/family-agent
 cp .env.example .env
-nano .env        # API-key + bot-token invullen
+nano .env        # tokens invullen, zie hieronder
 docker compose up -d --build
 docker compose logs -f     # meekijken; Ctrl+C stopt alleen het meekijken
 ```
 
-Stuur nu in de gezinsgroep `/start`. De bot antwoordt met een **chat-id** (negatief getal
-voor groepen). Zet dat in `.env` bij `TELEGRAM_ALLOWED_CHAT_IDS=`, en herstart:
+Let op: na élke `.env`-wijziging is het `docker compose up -d --force-recreate`
+(een kale `restart` laadt `.env` niet opnieuw).
 
-```bash
-docker compose restart
-```
+## Slack koppelen (2.0)
 
-Klaar. Test met: "Fien, we moeten nog een cadeau regelen voor het feestje van zaterdag."
+1. Maak een gratis Slack-workspace voor het gezin, met kanalen **#birdy**
+   (conversatie) en **#briefing** (leeskanaal voor de briefings).
+2. Op api.slack.com/apps: *Create New App → From scratch* in die workspace.
+   - **Socket Mode** aan → App-Level Token met scope `connections:write` → `SLACK_APP_TOKEN`.
+   - **OAuth & Permissions** → Bot Token Scopes: `app_mentions:read`,
+     `channels:history`, `channels:read`, `chat:write`, `files:read`, `files:write`,
+     `im:history`, `im:read`, `im:write`, `reactions:read`, `reactions:write`, `users:read`.
+   - **Event Subscriptions** → bot events: `message.channels`, `message.im`,
+     `app_mention`, `reaction_added`, `file_shared`.
+   - *Install to Workspace* → `SLACK_BOT_TOKEN`. Daarna `/invite @Birdy` in beide kanalen.
+3. Kanaal-ids (View channel details → onderaan) in `SLACK_CHANNEL_BIRDY` en
+   `SLACK_CHANNEL_BRIEFING`.
+4. Start met lege `SLACK_ALLOWED_MEMBER_IDS`, stuur de bot een DM — hij antwoordt met
+   je member-id. Invullen (komma-gescheiden), `--force-recreate`, klaar.
 
-## Agenda koppelen (Google Calendar, optioneel maar aan te raden)
+Bevestigen van voorstellen kan met een 👍-reactie op Birdy's bericht of gewoon "ja"
+in de thread.
 
-Fien leest jullie gedeelde gezinsagenda en kan er afspraken inzetten. Eenmalige setup
-(~10 minuten), via een "service-account" — een soort robot-account van Google dat jullie
-toegang geven tot alleen déze agenda:
+## Google koppelen (Calendar + Drive)
 
-1. Ga naar **console.cloud.google.com** (inloggen met je Google-account) →
-   projectkiezer linksboven → **New project** → naam "fien" → Create.
-2. Zoekbalk bovenin: zoek **"Google Calendar API"** → Enable.
-3. Menu → **IAM & Admin → Service Accounts** → **Create service account** →
-   naam "fien" → Create → (rollen overslaan) → Done.
-4. Klik het account aan → tab **Keys** → **Add key → Create new key → JSON** →
-   er downloadt een `.json`-bestand. Bewaar het goed; dit is de sleutel.
-5. Kopieer het e-mailadres van het service-account
-   (`fien@…iam.gserviceaccount.com`).
-6. Open **Google Calendar** (web) → tandwiel → instellingen van jullie
-   gezinsagenda → **Delen met specifieke personen** → voeg dat e-mailadres toe met
-   rechten **"Wijzigingen aanbrengen in afspraken"**.
-7. Zelfde instellingenpagina, kopje **"Agenda integreren"**: kopieer de **Agenda-ID**
-   (ziet eruit als `xxxx@group.calendar.google.com`).
-8. Zet de sleutel op de server en vul `.env` aan (vanaf je Mac):
+Birdy werkt met **OAuth als Jaap** (de Drive-map staat in een persoonlijke My Drive).
+Eenmalig, op je eigen laptop:
 
-```bash
-ssh root@JOUW_SERVER_IP "mkdir -p /root/family-agent/workspace/secrets"
-scp ~/Downloads/fien-*.json root@JOUW_SERVER_IP:/root/family-agent/workspace/secrets/service-account.json
-```
+1. In het bestaande Google Cloud-project: **Drive API** aanzetten (Calendar staat al aan).
+2. OAuth consent screen op **In production** (anders verloopt het token elke 7 dagen);
+   Credentials → **OAuth Client ID, type Desktop app**.
+3. `GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... python scripts/google_consent.py`
+   → inloggen → het script print het `GOOGLE_REFRESH_TOKEN`.
+4. De drie waarden in `.env` op de server; `GOOGLE_CALENDAR_ID` staat er al;
+   `DRIVE_ROOT_FOLDER_ID` = het id van de map "Birdy 2.0" (achter `/folders/` in de URL).
+5. Werkt alles, dan mag het oude service-account weg
+   (`workspace/secrets/service-account.json` + uitschakelen in Google Cloud). Zolang
+   de OAuth-variabelen leeg zijn, valt de agenda automatisch terug op het service-account.
 
-Vul in `.env` de `GOOGLE_CALENDAR_ID=` in, en `docker compose restart`. Test in de chat:
-"Fien, wat staat er deze week in de agenda?"
+Vraag daarna in de chat: "richt je archief in" — Birdy maakt zelf de mappenstructuur
+(00 Inbox, 10 Gezin, 20 Huishouden, 30 Financiën, 90 Archief). Bestanden die iemand in
+**00 Inbox** zet worden elke 5 minuten opgepikt en als voorstel in de chat gezet.
 
-Het sleutelbestand blijft buiten git (`workspace/.gitignore`) en geeft alleen toegang
-tot agenda's die jullie er expliciet mee delen.
+## Todoist koppelen (boodschappen & acties)
+
+Maak in Todoist twee gedeelde projecten: **Boodschappen** en **Acties**. Zet je
+API-token (Settings → Integrations → Developer) in `TODOIST_API_TOKEN`.
+Test: "voeg kwark toe aan de boodschappen".
+
+## Telegram (1.0 — tijdens de overgang)
+
+Werkt zoals voorheen: bot via @BotFather (`/setprivacy` → Disable), token in
+`TELEGRAM_BOT_TOKEN`, `/start` in de groep voor het chat-id →
+`TELEGRAM_ALLOWED_CHAT_IDS`. Laat de variabelen leeg om Telegram uit te zetten.
 
 ## Dagelijks gebruik
 
-- Alles wat in je hoofd zit → de groep in. Tekst of foto (lijstje, schoolbrief).
-- `/overzicht` — alles wat loopt, gesorteerd op urgentie.
-- 07:15 — ochtendbriefing: wat vandaag moet en wie het doet.
-- Zondag 19:30 — weekplanning.
-- 13:00 — Fien pakt zelf één uitzoektaak op en meldt het resultaat.
-- "die is klaar" / "verzet dat naar vrijdag" — gewoon zeggen, Fien werkt het bij.
+- Alles wat in je hoofd zit → #birdy in. Tekst, foto of pdf (lijstje, schoolbrief).
+- Documenten: Birdy stelt voor (wat, waarheen, welke agenda-items) → 👍 → gearchiveerd.
+- "voeg X toe aan de boodschappen" → staat op ieders telefoon in Todoist.
+- 07:15 — ochtendbriefing in #briefing; zondag 19:30 — weekplanning; 13:00 — Birdy
+  pakt zelf één uitzoektaak op.
+- "die is klaar" / "verzet dat naar vrijdag" — gewoon zeggen, Birdy werkt het bij.
 
 ## Veiligheid & principes
 
-- Alleen jullie eigen chat-ids worden bediend; de rest wordt genegeerd.
-- Fien verstuurt nooit iets naar de buitenwereld — voorwerk ja, versturen nee.
+- Alleen gewhiteliste Slack-member-ids / Telegram-chat-ids worden bediend.
+- Birdy verstuurt nooit iets naar de buitenwereld — voorwerk ja, versturen nee.
 - Alles staat als bestanden in `workspace/` onder git; elk moment terug te kijken.
 - Budget-plafonds: $1 per actie, $3 per dag (aanpasbaar in `.env`).
 - Standaard-eigenaar van nieuwe taken is Jaap — bewuste ontwerpkeuze.
