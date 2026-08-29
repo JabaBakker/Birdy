@@ -7,3 +7,5 @@ google-auth>=2.20
 requests>=2.31
 icalendar>=5.0
 recurring-ical-events>=2.1
+Pillow>=10.0
+pillow-heif>=0.15

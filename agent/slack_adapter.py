@@ -94,6 +94,30 @@ class SlackAdapter:
                 self._names[user_id] = "onbekend"
         return self._names[user_id]
 
+    @staticmethod
+    def _shrink_image(path: Path) -> Path:
+        """Telefoonfoto's verkleinen naar max 1600px JPEG: goedkoper voor vision en
+        ruim binnen de SDK-buffer. HEIC (iPhone) wordt meteen omgezet. Bij twijfel of
+        fouten blijft het origineel staan."""
+        try:
+            from PIL import Image
+            try:
+                from pillow_heif import register_heif_opener
+                register_heif_opener()
+            except ImportError:
+                pass
+            img = Image.open(path)
+            img = img.convert("RGB")
+            img.thumbnail((1600, 1600))
+            out = path.with_suffix(".jpg")
+            img.save(out, "JPEG", quality=85)
+            if out != path:
+                path.unlink(missing_ok=True)
+            return out
+        except Exception:
+            log.exception("foto verkleinen mislukt — origineel behouden")
+            return path
+
     async def _download_files(self, files: list[dict]) -> list[str]:
         """Slack-bijlagen naar de workspace-inbox; geeft relatieve paden terug."""
         notes: list[str] = []
@@ -112,6 +136,8 @@ class SlackAdapter:
                     async with session.get(url) as resp:
                         resp.raise_for_status()
                         dest.write_bytes(await resp.read())
+                    if sub == "photos":
+                        dest = await asyncio.to_thread(self._shrink_image, dest)
                     notes.append(f"inbox/{sub}/{dest.name}")
                 except Exception:
                     log.exception("download van Slack-bestand %s mislukt", name)

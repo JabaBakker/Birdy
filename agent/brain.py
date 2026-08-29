@@ -65,6 +65,9 @@ class Brain:
             permission_mode="acceptEdits",
             max_turns=self.cfg.max_turns,
             model=self.cfg.model,
+            # Foto's/pdf's komen als base64 door de SDK-stream; de standaardbuffer
+            # van 1 MB is te klein voor een telefoonfoto.
+            max_buffer_size=32 * 1024 * 1024,
         )
 
         reply: str | None = None
