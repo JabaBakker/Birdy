@@ -1,18 +1,15 @@
-"""Gezins-agent: Telegram-bot + brein + vaste momenten (ochtendbriefing, weekplanning).
+"""Gezins-agent: adapters (Slack/Telegram) + brein + vaste momenten.
 
 Draaien:  python -m agent.main
+
+Adapters gaan aan op basis van de .env: TELEGRAM_BOT_TOKEN → Telegram,
+SLACK_BOT_TOKEN + SLACK_APP_TOKEN → Slack. Beide tegelijk kan (overgangsfase).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import datetime
-
-from telegram import Update
-from telegram.constants import ChatAction
-from telegram.ext import (
-    Application, CommandHandler, ContextTypes, MessageHandler, filters,
-)
 
 from .brain import Brain, ensure_git
 from .config import Config
@@ -23,92 +20,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("fien")
 
 cfg = Config()
-ledger: Ledger
-brain: Brain
 work_lock = asyncio.Lock()  # één denkcyclus tegelijk
-
-
-def allowed(update: Update) -> bool:
-    return bool(update.effective_chat) and update.effective_chat.id in cfg.allowed_chat_ids
-
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat = update.effective_chat
-    if not allowed(update):
-        await chat.send_message(
-            f"Hoi! Ik ben {cfg.agent_name}. Dit gesprek is nog niet geactiveerd.\n"
-            f"Chat-id: {chat.id}\n"
-            f"Zet dit id in TELEGRAM_ALLOWED_CHAT_IDS in de .env op de server en "
-            f"herstart mij. Daarna doe ik mee."
-        )
-        return
-    await chat.send_message(
-        f"Hoi, ik ben {cfg.agent_name} 👋 Stuur me losse gedachten, to-do's of foto's van "
-        f"lijstjes en brieven — ik maak er taken van met een eigenaar en een datum.\n"
-        f"• /overzicht — alles wat loopt\n"
-        f"Elke ochtend om {cfg.digest_time} zet ik hier de dagbriefing neer."
-    )
-
-
-async def cmd_overzicht(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not allowed(update):
-        return
-    path = cfg.workspace / "OVERZICHT.md"
-    text = path.read_text().strip() if path.exists() else ""
-    await update.effective_chat.send_message(text or "Nog geen overzicht — stuur me eerst wat taken!")
-
-
-async def cmd_hulp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not allowed(update):
-        return
-    path = cfg.workspace / "HULP.md"
-    text = path.read_text().strip() if path.exists() else ""
-    await update.effective_chat.send_message(text or "Er is nog geen hulptekst — vraag me gewoon wat ik kan!")
-
-
-async def cmd_intenties(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not allowed(update):
-        return
-    path = cfg.workspace / "INTENTIES.md"
-    text = path.read_text().strip() if path.exists() else ""
-    await update.effective_chat.send_message(
-        text or "Nog geen intenties — zeg 'nieuwe intentie: …' en ik zet hem erbij."
-    )
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not allowed(update) or not update.message:
-        return
-    msg = update.message
-    sender = (msg.from_user.first_name if msg.from_user else "onbekend")
-    text = msg.text or msg.caption or ""
-
-    photo_note = ""
-    if msg.photo:
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        dest = cfg.workspace / "inbox" / "photos" / f"{stamp}.jpg"
-        file = await msg.photo[-1].get_file()
-        await file.download_to_drive(str(dest))
-        photo_note = f"inbox/photos/{dest.name}"
-
-    await update.effective_chat.send_action(ChatAction.TYPING)
-    async with work_lock:
-        reply = await brain.run(
-            "process_message.md", f"bericht van {sender}",
-            sender=sender, text=text or "(geen tekst)",
-            photo=photo_note or "(geen foto)",
-        )
-    await msg.reply_text(reply or "Hm, daar ging iets mis bij het verwerken — probeer het nog eens?")
-
-
-async def broadcast(app: Application, text: str | None) -> None:
-    if not text or text.strip().upper() == "STIL":
-        return
-    for chat_id in cfg.allowed_chat_ids:
-        try:
-            await app.bot.send_message(chat_id=chat_id, text=text)
-        except Exception:
-            log.exception("versturen naar %s mislukt", chat_id)
 
 
 def _due(spec: str, now: datetime, last: str | None) -> str | None:
@@ -129,13 +41,51 @@ def _due(spec: str, now: datetime, last: str | None) -> str | None:
     return None if key == last else key
 
 
-async def scheduler(app: Application) -> None:
+async def broadcast(adapters: list, text: str | None, kind: str = "briefing") -> None:
+    if not text or text.strip().upper() == "STIL":
+        return
+    for adapter in adapters:
+        try:
+            await adapter.broadcast(text, kind)
+        except Exception:
+            log.exception("broadcast via %s mislukt", type(adapter).__name__)
+
+
+async def check_drive_inbox(brain: Brain, adapters: list) -> None:
+    """Nieuwe bestanden in de Drive-inbox ophalen en door het brein laten verwerken."""
+    from . import gdrive  # lazy: google-libs alleen laden als Drive geconfigureerd is
+
+    try:
+        new_files = await asyncio.to_thread(gdrive.poll_inbox, cfg.workspace)
+    except Exception:
+        log.exception("Drive-inbox poll mislukt")
+        return
+    if not new_files:
+        return
+    log.info("Drive-inbox: %d nieuw(e) bestand(en)", len(new_files))
+    listing = "\n".join(f"- {name} → {local}" for name, local in new_files)
+    async with work_lock:
+        reply = await brain.run(
+            "process_message.md", "drive-inbox",
+            sender="de Drive-inbox (map 00 Inbox)",
+            text=(
+                "Er zijn nieuwe bestanden in de Drive-inbox gezet. Ze zijn al lokaal "
+                f"gedownload:\n{listing}\n"
+                "Lees ze en doe per bestand een archiveer-voorstel in de chat."
+            ),
+            photo=", ".join(local for _, local in new_files),
+        )
+    await broadcast(adapters, reply, kind="chat")
+
+
+async def scheduler(brain: Brain, adapters: list) -> None:
     fired: dict[str, str] = {}
     jobs = [
         ("digest", cfg.digest_time, "digest.md", "ochtendbriefing"),
         ("weekly", cfg.weekly_time, "weekly.md", "weekplanning"),
         ("proactive", cfg.proactive_time, "proactive.md", "eigen initiatief"),
     ]
+    last_inbox_check = datetime.min
     while True:
         now = datetime.now()
         for name, spec, prompt, label in jobs:
@@ -145,35 +95,50 @@ async def scheduler(app: Application) -> None:
                 log.info("vast moment: %s", label)
                 async with work_lock:
                     reply = await brain.run(prompt, label)
-                await broadcast(app, reply)
+                await broadcast(adapters, reply, kind="briefing")
+        if (
+            cfg.drive_root_folder_id
+            and cfg.drive_inbox_poll_min > 0
+            and (now - last_inbox_check).total_seconds() >= cfg.drive_inbox_poll_min * 60
+        ):
+            last_inbox_check = now
+            await check_drive_inbox(brain, adapters)
         await asyncio.sleep(20)
 
 
-async def post_init(app: Application) -> None:
-    app.create_task(scheduler(app))
-    log.info(
-        "%s draait. chats=%s digest=%s budget=$%.2f/dag",
-        cfg.agent_name, cfg.allowed_chat_ids or "SETUP-MODUS (stuur /start voor chat-id)",
-        cfg.digest_time, cfg.daily_budget_usd,
-    )
-
-
-def main() -> None:
-    global ledger, brain
+async def amain() -> None:
     cfg.validate()
     ensure_git(cfg.workspace)
     ledger = Ledger(cfg.workspace / "memory" / "ledger.json")
     brain = Brain(cfg, ledger)
 
-    app = Application.builder().token(cfg.bot_token).post_init(post_init).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("overzicht", cmd_overzicht))
-    app.add_handler(CommandHandler("hulp", cmd_hulp))
-    app.add_handler(CommandHandler("help", cmd_hulp))
-    app.add_handler(CommandHandler("intenties", cmd_intenties))
-    app.add_handler(CommandHandler("afspraken", cmd_intenties))  # alias
-    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
-    app.run_polling(allowed_updates=["message"])
+    adapters = []
+    if cfg.bot_token:
+        from .telegram_adapter import TelegramAdapter
+        adapters.append(TelegramAdapter(cfg, brain, work_lock))
+    if cfg.slack_bot_token and cfg.slack_app_token:
+        from .slack_adapter import SlackAdapter
+        adapters.append(SlackAdapter(cfg, brain, work_lock))
+
+    for adapter in adapters:
+        await adapter.start()
+    log.info(
+        "%s draait. adapters=%s digest=%s budget=$%.2f/dag",
+        cfg.agent_name, [type(a).__name__ for a in adapters],
+        cfg.digest_time, cfg.daily_budget_usd,
+    )
+    try:
+        await scheduler(brain, adapters)
+    finally:
+        for adapter in adapters:
+            try:
+                await adapter.stop()
+            except Exception:
+                log.exception("adapter %s stoppen mislukt", type(adapter).__name__)
+
+
+def main() -> None:
+    asyncio.run(amain())
 
 
 if __name__ == "__main__":

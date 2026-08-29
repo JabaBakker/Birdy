@@ -40,6 +40,25 @@ class Config:
         if x.strip().lstrip("-").isdigit()
     ])
 
+    # Slack (Socket Mode). Beide tokens gezet = Slack-adapter aan.
+    slack_bot_token: str = field(default_factory=lambda: os.environ.get("SLACK_BOT_TOKEN", ""))
+    slack_app_token: str = field(default_factory=lambda: os.environ.get("SLACK_APP_TOKEN", ""))
+    # Komma-gescheiden member-ids die de bot mag bedienen. Leeg = setup-modus:
+    # de bot antwoordt dan alleen in DM met het member-id, zodat je het kunt invullen.
+    slack_allowed_member_ids: list[str] = field(default_factory=lambda: [
+        x.strip() for x in os.environ.get("SLACK_ALLOWED_MEMBER_IDS", "").split(",") if x.strip()
+    ])
+    slack_channel_birdy: str = field(default_factory=lambda: os.environ.get("SLACK_CHANNEL_BIRDY", ""))
+    slack_channel_briefing: str = field(
+        default_factory=lambda: os.environ.get("SLACK_CHANNEL_BRIEFING", "")
+    )
+
+    # Google Drive documentenhub (map-id van "Birdy 2.0"; leeg = inbox-poll uit)
+    drive_root_folder_id: str = field(
+        default_factory=lambda: os.environ.get("DRIVE_ROOT_FOLDER_ID", "")
+    )
+    drive_inbox_poll_min: int = field(default_factory=lambda: _env_int("AGENT_DRIVE_INBOX_POLL_MIN", 5))
+
     agent_name: str = field(default_factory=lambda: os.environ.get("AGENT_NAME", "Fien"))
 
     # Vaste momenten (lokale tijd, HH:MM). Leeg = uit.
@@ -56,7 +75,13 @@ class Config:
     def validate(self) -> None:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             raise SystemExit("ANTHROPIC_API_KEY ontbreekt in .env")
-        if not self.bot_token:
-            raise SystemExit("TELEGRAM_BOT_TOKEN ontbreekt in .env (maak een bot via @BotFather)")
+        slack_ok = bool(self.slack_bot_token and self.slack_app_token)
+        if not self.bot_token and not slack_ok:
+            raise SystemExit(
+                "Geen kanaal geconfigureerd: zet TELEGRAM_BOT_TOKEN en/of "
+                "SLACK_BOT_TOKEN + SLACK_APP_TOKEN in .env"
+            )
+        if self.slack_bot_token and not self.slack_app_token:
+            raise SystemExit("SLACK_APP_TOKEN ontbreekt (Socket Mode vereist een xapp-token)")
         if not self.workspace.exists():
             raise SystemExit(f"Workspace niet gevonden: {self.workspace}")
