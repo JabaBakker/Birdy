@@ -5,8 +5,9 @@ De agent roept dit aan via Bash:
     python /app/agent/gcal.py add "Titel" --start "2026-08-21 14:00" --duur 60
     python /app/agent/gcal.py add "Titel" --dag 2026-08-21          (hele dag)
 
-Vereist in .env: GOOGLE_CALENDAR_ID, en het sleutelbestand op
-GOOGLE_SERVICE_ACCOUNT_FILE (standaard: <workspace>/secrets/service-account.json).
+Vereist in .env: GOOGLE_CALENDAR_ID plus een Google-koppeling — bij voorkeur OAuth
+(GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN, zie scripts/google_consent.py); het oude
+service-account-bestand werkt als terugval tijdens de overgang.
 """
 from __future__ import annotations
 
@@ -18,25 +19,18 @@ from datetime import datetime, timedelta
 TZ = "Europe/Amsterdam"
 
 
+try:
+    from agent.google_auth import CALENDAR_SCOPE, configured, google_credentials
+except ImportError:  # aangeroepen als los script: python /app/agent/gcal.py
+    from google_auth import CALENDAR_SCOPE, configured, google_credentials
+
+
 def _service():
     try:
-        from google.oauth2 import service_account
         from googleapiclient.discovery import build
     except ImportError:
         sys.exit("google-api-python-client is niet geïnstalleerd")
-
-    key_file = os.environ.get(
-        "GOOGLE_SERVICE_ACCOUNT_FILE",
-        os.path.join(os.environ.get("AGENT_WORKSPACE", "."), "secrets", "service-account.json"),
-    )
-    if not os.path.exists(key_file):
-        sys.exit(
-            "Agenda is nog niet gekoppeld (geen service-account.json gevonden). "
-            "Meld dit kort in de chat in plaats van het opnieuw te proberen."
-        )
-    creds = service_account.Credentials.from_service_account_file(
-        key_file, scopes=["https://www.googleapis.com/auth/calendar"]
-    )
+    creds = google_credentials([CALENDAR_SCOPE])
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
@@ -49,11 +43,7 @@ def _cal_id() -> str:
 
 def _google_events(days: int) -> list[tuple[str, str]]:
     """(sorteersleutel, regel) uit de Google-gezinsagenda. Leeg als niet gekoppeld."""
-    key_file = os.environ.get(
-        "GOOGLE_SERVICE_ACCOUNT_FILE",
-        os.path.join(os.environ.get("AGENT_WORKSPACE", "."), "secrets", "service-account.json"),
-    )
-    if not (os.environ.get("GOOGLE_CALENDAR_ID") and os.path.exists(key_file)):
+    if not (os.environ.get("GOOGLE_CALENDAR_ID") and configured()):
         return []
     svc = _service()
     now = datetime.now()
