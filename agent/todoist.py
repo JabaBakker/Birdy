@@ -16,7 +16,7 @@ import argparse
 import os
 import sys
 
-API = "https://api.todoist.com/rest/v2"
+API = "https://api.todoist.com/api/v1"
 
 
 def _request(method: str, path: str, **kwargs):
@@ -36,8 +36,23 @@ def _request(method: str, path: str, **kwargs):
     return resp.json() if resp.text else None
 
 
+def _list_all(path: str, params: dict | None = None) -> list[dict]:
+    """Lijst-endpoints van de v1-API pagineren via {'results': [...], 'next_cursor': ...}."""
+    params = dict(params or {})
+    out: list[dict] = []
+    while True:
+        data = _request("GET", path, params=params)
+        if isinstance(data, list):  # voor het geval een endpoint plat antwoordt
+            return data
+        out.extend(data.get("results", []))
+        cursor = data.get("next_cursor")
+        if not cursor:
+            return out
+        params["cursor"] = cursor
+
+
 def _projects() -> list[dict]:
-    return _request("GET", "/projects")
+    return _list_all("/projects")
 
 
 def _project(name: str) -> dict:
@@ -72,10 +87,10 @@ def cmd_add(content: str, lijst: str, wanneer: str | None) -> None:
 def cmd_list(lijst: str | None) -> None:
     if lijst:
         project = _project(lijst)
-        tasks = _request("GET", "/tasks", params={"project_id": project["id"]})
+        tasks = _list_all("/tasks", {"project_id": project["id"]})
         header = project["name"]
     else:
-        tasks = _request("GET", "/tasks")
+        tasks = _list_all("/tasks")
         header = "alle lijsten"
     if not tasks:
         print(f"{header}: leeg ✅")
@@ -88,7 +103,7 @@ def cmd_list(lijst: str | None) -> None:
 
 def cmd_done(query: str, lijst: str | None) -> None:
     params = {"project_id": _project(lijst)["id"]} if lijst else None
-    tasks = _request("GET", "/tasks", params=params)
+    tasks = _list_all("/tasks", params)
     wanted = query.strip().lower()
     matches = [t for t in tasks if wanted in t["content"].lower()]
     if not matches:
