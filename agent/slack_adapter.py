@@ -32,7 +32,9 @@ class SlackAdapter:
         self.brain = brain
         self.work_lock = work_lock
         self.app = AsyncApp(token=cfg.slack_bot_token)
-        self.handler = AsyncSocketModeHandler(self.app, cfg.slack_app_token)
+        # De Socket Mode-handler maakt een aiohttp-sessie aan en heeft daarvoor een
+        # draaiende event-loop nodig — dus pas aanmaken in start().
+        self.handler: AsyncSocketModeHandler | None = None
         self._task: asyncio.Task | None = None
         self._bot_user_id: str | None = None
         self._names: dict[str, str] = {}  # member-id -> voornaam
@@ -47,6 +49,7 @@ class SlackAdapter:
     async def start(self) -> None:
         auth = await self.app.client.auth_test()
         self._bot_user_id = auth["user_id"]
+        self.handler = AsyncSocketModeHandler(self.app, self.cfg.slack_app_token)
         self._task = asyncio.create_task(self.handler.start_async())
         log.info(
             "Slack-adapter draait als %s. leden=%s",
@@ -55,7 +58,8 @@ class SlackAdapter:
         )
 
     async def stop(self) -> None:
-        await self.handler.close_async()
+        if self.handler:
+            await self.handler.close_async()
         if self._task:
             self._task.cancel()
 
