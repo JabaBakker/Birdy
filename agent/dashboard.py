@@ -94,6 +94,17 @@ def _todoist_afvinken(task_id: str) -> bool:
         return False
 
 
+def _todoist_toevoegen(lijst: str, tekst: str) -> bool:
+    from . import todoist
+
+    try:
+        project = todoist._project(lijst)
+        todoist._request("POST", "/tasks", json={"content": tekst, "project_id": project["id"]})
+        return True
+    except BaseException:
+        return False
+
+
 def _verjaardagen() -> list[dict]:
     from . import gdrive
 
@@ -142,6 +153,7 @@ class Dashboard:
         app.router.add_get("/api/overview", self.overview)
         app.router.add_post("/api/message", self.message)
         app.router.add_post("/api/done", self.done)
+        app.router.add_post("/api/add", self.add)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         site = web.TCPSite(self._runner, "0.0.0.0", self.cfg.dashboard_port)
@@ -201,6 +213,22 @@ class Dashboard:
         if not task_id or len(task_id) > 40:
             return web.json_response({"error": "geen taak-id"}, status=400)
         ok = await asyncio.to_thread(_todoist_afvinken, task_id)
+        if ok:
+            self._cache = None
+        return web.json_response({"ok": ok}, status=200 if ok else 502)
+
+    async def add(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            lijst = str(body.get("lijst", "")).strip().lower()
+            tekst = str(body.get("tekst", "")).strip()[:200]
+        except Exception:
+            lijst, tekst = "", ""
+        if lijst not in ("boodschappen", "acties") or not tekst:
+            return web.json_response({"error": "lijst of tekst ontbreekt"}, status=400)
+        ok = await asyncio.to_thread(_todoist_toevoegen, lijst, tekst)
         if ok:
             self._cache = None
         return web.json_response({"ok": ok}, status=200 if ok else 502)
@@ -277,6 +305,10 @@ PAGE = """<!doctype html>
   li.vink::before { content:"◯"; color:var(--accent); font-size:.95rem; }
   li.vink.gedaan { opacity:.4; text-decoration:line-through; pointer-events:none; }
   li.vink.gedaan::before { content:"✓"; }
+  .toevoeg { margin-top:.55rem; }
+  .toevoeg input { width:100%; background:transparent; border:none; border-top:1px solid var(--lijn);
+                   color:var(--ink); padding:.55rem .2rem 0; font-size:.98rem; outline:none; }
+  .toevoeg input::placeholder { color:var(--dim); }
   .leeg { color:var(--dim); font-style:italic; }
   #jarig li b { color:var(--amber); }
   #antwoord { position:fixed; right:1.2rem; bottom:1.2rem; max-width:min(440px,85vw);
@@ -300,8 +332,12 @@ PAGE = """<!doctype html>
       <div class="panel"><h2>📋 Wat loopt er</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
       <div class="panel" id="jarig"><h2>🎂 Verjaardagen</h2><ul id="verjaardagen"></ul></div>
     </div>
-    <div class="panel"><h2>🛒 Boodschappen</h2><ul id="boodschappen"></ul></div>
-    <div class="panel"><h2>⚡ Acties</h2><ul id="acties"></ul></div>
+    <div class="panel"><h2>🛒 Boodschappen</h2><ul id="boodschappen"></ul>
+      <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
+        onkeydown="voegToe(event,'boodschappen',this)"></div></div>
+    <div class="panel"><h2>⚡ Acties</h2><ul id="acties"></ul>
+      <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
+        onkeydown="voegToe(event,'acties',this)"></div></div>
   </div>
 </div>
 <div id="antwoord"></div>
@@ -371,6 +407,19 @@ async function stuur(tekst){
     toon('🐦 ' + (d.reply || d.error || 'er ging iets mis'));
     ververs();
   } catch(e){ toon('🐦 Birdy is even niet bereikbaar.'); }
+}
+async function voegToe(ev, lijst, input){
+  if (ev.key !== 'Enter') return;
+  const tekst = input.value.trim(); if (!tekst) return;
+  input.value = ''; input.placeholder = '… toevoegen';
+  try {
+    const r = await fetch('/api/add', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ lijst, tekst }) });
+    if (!r.ok) throw new Error();
+    await ververs();
+  } catch(e){ input.value = tekst; toon('Toevoegen lukte even niet — probeer nog eens.'); }
+  input.placeholder = '+ toevoegen…';
 }
 async function vink(el, id){
   el.classList.add('gedaan');

@@ -199,6 +199,14 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                 async with s.post("http://127.0.0.1:18811/api/done", json={"id": "123"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 502)  # geen Todoist-token in de test
+                async with s.post("http://127.0.0.1:18811/api/add",
+                                  json={"lijst": "werk", "tekst": "x"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # alleen boodschappen/acties
+                async with s.post("http://127.0.0.1:18811/api/add",
+                                  json={"lijst": "acties", "tekst": "band plakken"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 502)  # geen Todoist-token in de test
             self.assertEqual(brain.calls[0][2]["text"], "voeg kwark toe")
         finally:
             await d.stop()
