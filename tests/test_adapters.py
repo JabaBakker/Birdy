@@ -185,7 +185,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                                  headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 200)
                     data = await r.json()
-                    for veld in ("agenda", "overzicht", "boodschappen", "acties", "verjaardagen"):
+                    for veld in ("agenda", "taken", "boodschappen", "acties", "verjaardagen"):
                         self.assertIn(veld, data)
                 async with s.post("http://127.0.0.1:18811/api/message",
                                   json={"text": "voeg kwark toe"},
@@ -194,6 +194,17 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(brain.calls[0][2]["text"], "voeg kwark toe")
         finally:
             await d.stop()
+
+    def test_overzicht_kort(self):
+        from agent.dashboard import _overzicht_kort
+        kort = _overzicht_kort(
+            "📋 OVERZICHT (bijgewerkt)\n\n🔴 NU / TE LAAT\n• Cadeau regelen — Jaap\n\n"
+            "🟠 DEZE WEEK\n• Zwemles opzeggen — Yvette\n\n🟡 LATER\n• Schuur opruimen\n"
+            "• Banden wisselen\n\n⏳ WACHTEN OP\n• Reactie school\n\n✅ Net klaar: iets"
+        )
+        self.assertEqual(kort["urgent"], ["Cadeau regelen — Jaap"])
+        self.assertEqual(kort["week"], ["Zwemles opzeggen — Yvette"])
+        self.assertEqual(kort["rest"], "2 voor later · 1 wachten op")
 
     def test_gdrive_query_escaping(self):
         from agent import gdrive
