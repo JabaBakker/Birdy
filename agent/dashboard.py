@@ -14,8 +14,11 @@ import asyncio
 import logging
 import time
 from datetime import date, datetime
+from pathlib import Path
 
 from aiohttp import web
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 from .brain import Brain
 from .config import Config
@@ -154,6 +157,7 @@ class Dashboard:
         app.router.add_post("/api/message", self.message)
         app.router.add_post("/api/done", self.done)
         app.router.add_post("/api/add", self.add)
+        app.router.add_get("/logo.png", self.logo)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         site = web.TCPSite(self._runner, "0.0.0.0", self.cfg.dashboard_port)
@@ -177,6 +181,13 @@ class Dashboard:
 
     async def page(self, request: web.Request) -> web.Response:
         return web.Response(text=PAGE, content_type="text/html")
+
+    async def logo(self, request: web.Request) -> web.Response:
+        pad = STATIC_DIR / "logo.png"
+        if not pad.exists():
+            raise web.HTTPNotFound()  # de pagina valt dan terug op het vogel-emoji
+        return web.Response(body=pad.read_bytes(), content_type="image/png",
+                            headers={"Cache-Control": "max-age=86400"})
 
     async def overview(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
@@ -264,6 +275,7 @@ PAGE = """<!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/logo.png">
 <title>Birdy</title>
 <style>
   :root { --bg:#14171a; --panel:#1d2126; --ink:#e8e6df; --dim:#8b948f; --accent:#7fbfa6;
@@ -271,8 +283,10 @@ PAGE = """<!doctype html>
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,sans-serif;
          padding:1.2rem; min-height:100vh; }
-  header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:.9rem; }
-  header h1 { font-size:1.4rem; } header h1 span { color:var(--accent); }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:.9rem; }
+  header h1 { font-size:1.4rem; display:flex; align-items:center; gap:.55rem; }
+  header h1 span { color:var(--accent); }
+  header img { height:2.3rem; }
   #klok { color:var(--dim); font-size:1.05rem; text-transform:capitalize; }
   #tekstinvoer { display:flex; gap:.5rem; margin-bottom:1rem; }
   #tekstinvoer input { flex:1; background:var(--panel); border:1px solid #333a41; border-radius:12px;
@@ -280,8 +294,8 @@ PAGE = """<!doctype html>
   #tekstinvoer button { border:none; border-radius:12px; padding:0 1.2rem; font-size:1.3rem;
                         cursor:pointer; }
   #stuurknop { background:var(--accent); color:#14171a; }
-  #mic { background:var(--panel); border:1px solid #333a41 !important; }
-  #mic.luistert { background:var(--amber); animation:pulse 1.2s infinite; }
+  .micknop { background:var(--panel); border:1px solid #333a41 !important; }
+  .micknop.luistert { background:var(--amber); animation:pulse 1.2s infinite; }
   @keyframes pulse { 50% { transform:scale(1.06); } }
   .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
           align-items:start; }
@@ -311,19 +325,47 @@ PAGE = """<!doctype html>
   .toevoeg input::placeholder { color:var(--dim); }
   .leeg { color:var(--dim); font-style:italic; }
   #jarig li b { color:var(--amber); }
-  #antwoord { position:fixed; right:1.2rem; bottom:1.2rem; max-width:min(440px,85vw);
-              background:var(--panel); border:1px solid var(--accent); border-radius:14px;
-              padding:.8rem 1rem; font-size:1rem; display:none; box-shadow:0 4px 20px rgba(0,0,0,.4); }
+  #melding { position:fixed; left:1.2rem; bottom:1.2rem; max-width:min(360px,80vw);
+             background:var(--panel); border:1px solid var(--amber); border-radius:12px;
+             padding:.7rem .9rem; font-size:.95rem; display:none; z-index:60; }
+  #chatfab { position:fixed; right:1.2rem; bottom:1.2rem; width:66px; height:66px; border-radius:50%;
+             border:none; background:var(--accent); cursor:pointer; z-index:40; font-size:1.8rem;
+             box-shadow:0 4px 20px rgba(0,0,0,.45); display:flex; align-items:center;
+             justify-content:center; }
+  #chatfab img { height:2.4rem; }
+  #chat { position:fixed; right:1.2rem; bottom:1.2rem; width:min(400px,92vw);
+          height:min(580px,80vh); background:var(--panel); border:1px solid var(--lijn);
+          border-radius:16px; display:none; flex-direction:column; z-index:50;
+          box-shadow:0 10px 40px rgba(0,0,0,.55); }
+  #chat.open { display:flex; }
+  #chatkop { display:flex; align-items:center; gap:.6rem; padding:.75rem 1rem;
+             border-bottom:1px solid var(--lijn); font-weight:600; }
+  #chatkop img { height:1.7rem; }
+  #chatkop button { margin-left:auto; background:none; border:none; color:var(--dim);
+                    font-size:1.25rem; cursor:pointer; }
+  #chatlog { flex:1; overflow-y:auto; padding:.9rem; display:flex; flex-direction:column; gap:.5rem; }
+  .bub { max-width:85%; padding:.55rem .85rem; border-radius:14px; font-size:.98rem;
+         line-height:1.45; white-space:pre-wrap; overflow-wrap:break-word; }
+  .bub.ik { align-self:flex-end; background:var(--accent); color:#14171a;
+            border-bottom-right-radius:4px; }
+  .bub.birdy { align-self:flex-start; background:#262b31; border-bottom-left-radius:4px; }
+  .bub.wacht { color:var(--dim); font-style:italic; }
+  #chatinvoer { display:flex; gap:.45rem; padding:.7rem; border-top:1px solid var(--lijn); }
+  #chatinvoer input { flex:1; background:var(--bg); border:1px solid #333a41; border-radius:10px;
+                      color:var(--ink); padding:.6rem .8rem; font-size:1rem; }
+  #chatinvoer button { border:none; border-radius:10px; padding:0 .9rem; font-size:1.15rem;
+                       cursor:pointer; background:var(--accent); color:#14171a; }
   #sleutel { display:none; padding:2rem; text-align:center; }
   #sleutel input { font-size:1.1rem; padding:.6rem; border-radius:8px; border:1px solid #444; }
 </style></head><body>
 <div id="sleutel"><p>Vul de dashboard-sleutel in (staat in de .env op de server):</p><br>
   <input id="sleutelveld" placeholder="sleutel"> <button onclick="zetSleutel()">Opslaan</button></div>
 <div id="app" style="display:none">
-  <header><h1>🐦 <span>Birdy</span></h1><div id="klok"></div></header>
+  <header><h1><img src="/logo.png" alt="" onerror="this.replaceWith('🐦')"><span>Birdy</span></h1>
+    <div id="klok"></div></header>
   <div id="tekstinvoer">
     <input id="invoer" placeholder="Zeg of typ iets tegen Birdy — “voeg kwark toe aan de boodschappen”">
-    <button id="mic" title="Praat tegen Birdy">🎤</button>
+    <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
     <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
   </div>
   <div class="grid">
@@ -340,7 +382,19 @@ PAGE = """<!doctype html>
         onkeydown="voegToe(event,'acties',this)"></div></div>
   </div>
 </div>
-<div id="antwoord"></div>
+<div id="melding"></div>
+<button id="chatfab" title="Chat met Birdy" onclick="chatOpen(true)">
+  <img src="/logo.png" alt="" onerror="this.replaceWith('💬')"></button>
+<div id="chat">
+  <div id="chatkop"><img src="/logo.png" alt="" onerror="this.replaceWith('🐦')">Birdy
+    <button onclick="chatOpen(false)" title="Sluiten">✕</button></div>
+  <div id="chatlog"></div>
+  <div id="chatinvoer">
+    <input id="chatveld" placeholder="Typ je bericht…" enterkeyhint="send">
+    <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
+    <button onclick="stuur(document.getElementById('chatveld').value)">→</button>
+  </div>
+</div>
 <script>
 let KEY = null;
 try { KEY = localStorage.getItem('birdy-key'); } catch (e) {}
@@ -384,9 +438,9 @@ async function ververs(){
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
     vul('boodschappen', d.boodschappen,
-        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${x.tekst}</span></li>`);
+        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${esc(x.tekst)}</span></li>`);
     vul('acties', d.acties,
-        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${x.tekst}</span></li>`);
+        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${esc(x.tekst)}</span></li>`);
     vul('verjaardagen', d.verjaardagen,
         j => `<li><small>${j.datum}</small><span>${j.naam} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
   } catch (e) { /* volgende poging over 60s */ }
@@ -395,19 +449,41 @@ function toonSleutel(){ document.getElementById('app').style.display='none';
   document.getElementById('sleutel').style.display='block'; }
 ververs(); setInterval(ververs, 60000);
 
+// ── chat ──────────────────────────────────────────────────────────────────
+function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+let chatGesch = [];
+try { chatGesch = JSON.parse(localStorage.getItem('birdy-chat')) || []; } catch (e) {}
+function chatBewaar(){ try { localStorage.setItem('birdy-chat',
+  JSON.stringify(chatGesch.slice(-60))); } catch (e) {} }
+function chatRender(){ const log = document.getElementById('chatlog');
+  log.innerHTML = chatGesch.map(m => `<div class="bub ${m.wie}">${esc(m.tekst)}</div>`).join('');
+  log.scrollTop = log.scrollHeight; }
+function chatOpen(open){
+  document.getElementById('chat').classList.toggle('open', open);
+  document.getElementById('chatfab').style.display = open ? 'none' : 'flex';
+  if (open) { chatRender(); document.getElementById('chatveld').focus(); }
+}
+function chatVoeg(wie, tekst){ chatGesch.push({ wie, tekst }); chatBewaar(); chatRender(); }
+
 async function stuur(tekst){
-  tekst = (tekst||'').trim(); if (!tekst) return;
+  tekst = (tekst || '').trim(); if (!tekst) return;
   document.getElementById('invoer').value = '';
-  toon('🐦 …denkt na…');
+  document.getElementById('chatveld').value = '';
+  chatOpen(true); chatVoeg('ik', tekst);
+  const log = document.getElementById('chatlog');
+  const wacht = document.createElement('div');
+  wacht.className = 'bub birdy wacht'; wacht.textContent = '…denkt na…';
+  log.appendChild(wacht); log.scrollTop = log.scrollHeight;
   try {
     const r = await fetch('/api/message', { method:'POST',
       headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
       body: JSON.stringify({ text: tekst }) });
     const d = await r.json();
-    toon('🐦 ' + (d.reply || d.error || 'er ging iets mis'));
+    wacht.remove(); chatVoeg('birdy', d.reply || d.error || 'er ging iets mis');
     ververs();
-  } catch(e){ toon('🐦 Birdy is even niet bereikbaar.'); }
+  } catch(e){ wacht.remove(); chatVoeg('birdy', 'Ik ben even niet bereikbaar — probeer het zo nog eens.'); }
 }
+
 async function voegToe(ev, lijst, input){
   if (ev.key !== 'Enter') return;
   const tekst = input.value.trim(); if (!tekst) return;
@@ -434,27 +510,28 @@ async function vink(el, id){
     toon('Afvinken lukte even niet — probeer nog eens.');
   }
 }
-function toon(t){ const a = document.getElementById('antwoord');
+function toon(t){ const a = document.getElementById('melding');
   a.textContent = t; a.style.display = 'block';
-  clearTimeout(a._t); a._t = setTimeout(() => a.style.display='none', 30000); }
+  clearTimeout(a._t); a._t = setTimeout(() => a.style.display='none', 8000); }
 
-const mic = document.getElementById('mic');
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, bezig = false;
-mic.onclick = () => {
+let rec = null, luistert = false;
+function spraak(knop){
   if (!SR) {
-    document.getElementById('invoer').focus();
-    toon('🎤 Spraak werkt in Chrome of Safari — hier kun je wel gewoon typen.');
+    chatOpen(true); document.getElementById('chatveld').focus();
+    toon('🎤 Spraak werkt in Chrome of Safari — typen kan altijd.');
     return;
   }
-  if (bezig) { rec.stop(); return; }
+  if (luistert) { rec.stop(); return; }
   rec = new SR(); rec.lang = 'nl-NL'; rec.interimResults = false;
-  rec.onstart = () => { bezig = true; mic.classList.add('luistert'); };
-  rec.onend = () => { bezig = false; mic.classList.remove('luistert'); };
+  rec.onstart = () => { luistert = true; knop.classList.add('luistert'); };
+  rec.onend = () => { luistert = false; knop.classList.remove('luistert'); };
   rec.onerror = () => toon('🎤 Ik kon je niet verstaan — probeer nog eens.');
-  rec.onresult = ev => { const t = ev.results[0][0].transcript; toon('🎤 “' + t + '”'); stuur(t); };
+  rec.onresult = ev => stuur(ev.results[0][0].transcript);
   rec.start();
-};
+}
 document.getElementById('invoer').addEventListener('keydown',
+  e => { if (e.key === 'Enter') stuur(e.target.value); });
+document.getElementById('chatveld').addEventListener('keydown',
   e => { if (e.key === 'Enter') stuur(e.target.value); });
 </script></body></html>"""
