@@ -95,6 +95,12 @@ async def scheduler(brain: Brain, adapters: list) -> None:
                 log.info("vast moment: %s", label)
                 async with work_lock:
                     reply = await brain.run(prompt, label)
+                if reply is None and name != "proactive":
+                    # Geen stille uitval (FR-F3): een mislukte briefing melden we zelf.
+                    reply = (
+                        f"⚠️ De {label} is zojuist mislukt. Ik probeer het morgen gewoon "
+                        f"weer; check eventueel de serverlogs (docker compose logs)."
+                    )
                 await broadcast(adapters, reply, kind="briefing")
         if (
             cfg.drive_root_folder_id
