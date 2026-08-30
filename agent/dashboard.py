@@ -158,6 +158,7 @@ class Dashboard:
         app.router.add_post("/api/done", self.done)
         app.router.add_post("/api/add", self.add)
         app.router.add_get("/logo.png", self.logo)
+        app.router.add_get("/logo-bird.png", self.logo)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         site = web.TCPSite(self._runner, "0.0.0.0", self.cfg.dashboard_port)
@@ -183,7 +184,8 @@ class Dashboard:
         return web.Response(text=PAGE, content_type="text/html")
 
     async def logo(self, request: web.Request) -> web.Response:
-        pad = STATIC_DIR / "logo.png"
+        naam = "logo-bird.png" if request.path.endswith("logo-bird.png") else "logo.png"
+        pad = STATIC_DIR / naam
         if not pad.exists():
             raise web.HTTPNotFound()  # de pagina valt dan terug op het vogel-emoji
         return web.Response(body=pad.read_bytes(), content_type="image/png",
@@ -275,7 +277,7 @@ PAGE = """<!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="/logo.png">
+<link rel="icon" href="/logo-bird.png">
 <title>Birdy</title>
 <style>
   :root { --bg:#14171a; --panel:#1d2126; --ink:#e8e6df; --dim:#8b948f; --accent:#7fbfa6;
@@ -358,10 +360,12 @@ PAGE = """<!doctype html>
   #sleutel { display:none; padding:2rem; text-align:center; }
   #sleutel input { font-size:1.1rem; padding:.6rem; border-radius:8px; border:1px solid #444; }
 </style></head><body>
-<div id="sleutel"><p>Vul de dashboard-sleutel in (staat in de .env op de server):</p><br>
+<div id="sleutel">
+  <img src="/logo.png" alt="Birdy" style="max-height:200px" onerror="this.style.display='none'"><br><br>
+  <p>Vul de dashboard-sleutel in (staat in de .env op de server):</p><br>
   <input id="sleutelveld" placeholder="sleutel"> <button onclick="zetSleutel()">Opslaan</button></div>
 <div id="app" style="display:none">
-  <header><h1><img src="/logo.png" alt="" onerror="this.replaceWith('🐦')"><span>Birdy</span></h1>
+  <header><h1><img src="/logo-bird.png" alt="" onerror="this.replaceWith('🐦')"><span>Birdy</span></h1>
     <div id="klok"></div></header>
   <div id="tekstinvoer">
     <input id="invoer" placeholder="Zeg of typ iets tegen Birdy — “voeg kwark toe aan de boodschappen”">
@@ -384,9 +388,9 @@ PAGE = """<!doctype html>
 </div>
 <div id="melding"></div>
 <button id="chatfab" title="Chat met Birdy" onclick="chatOpen(true)">
-  <img src="/logo.png" alt="" onerror="this.replaceWith('💬')"></button>
+  <img src="/logo-bird.png" alt="" onerror="this.replaceWith('💬')"></button>
 <div id="chat">
-  <div id="chatkop"><img src="/logo.png" alt="" onerror="this.replaceWith('🐦')">Birdy
+  <div id="chatkop"><img src="/logo-bird.png" alt="" onerror="this.replaceWith('🐦')">Birdy
     <button onclick="chatOpen(false)" title="Sluiten">✕</button></div>
   <div id="chatlog"></div>
   <div id="chatinvoer">
