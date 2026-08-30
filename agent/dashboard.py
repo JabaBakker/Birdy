@@ -103,6 +103,16 @@ def _todoist_afvinken(task_id: str) -> bool:
         return False
 
 
+def _todoist_deadline(task_id: str, datum: str) -> bool:
+    from . import todoist
+
+    try:
+        todoist._request("POST", f"/tasks/{task_id}", json={"due_date": datum})
+        return True
+    except BaseException:
+        return False
+
+
 def _todoist_toevoegen(lijst: str, tekst: str) -> bool:
     from . import todoist
 
@@ -163,6 +173,7 @@ class Dashboard:
         app.router.add_post("/api/message", self.message)
         app.router.add_post("/api/done", self.done)
         app.router.add_post("/api/add", self.add)
+        app.router.add_post("/api/due", self.due)
         app.router.add_get("/logo.png", self.logo)
         app.router.add_get("/logo-bird.png", self.logo)
         self._runner = web.AppRunner(app, access_log=None)
@@ -232,6 +243,24 @@ class Dashboard:
         if not task_id or len(task_id) > 40:
             return web.json_response({"error": "geen taak-id"}, status=400)
         ok = await asyncio.to_thread(_todoist_afvinken, task_id)
+        if ok:
+            self._cache = None
+        return web.json_response({"ok": ok}, status=200 if ok else 502)
+
+    async def due(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            task_id = str(body.get("id", "")).strip()
+            datum = str(body.get("datum", "")).strip()
+        except Exception:
+            task_id, datum = "", ""
+        geldig = (len(datum) == 10 and datum[4] == "-" and datum[7] == "-"
+                  and datum.replace("-", "").isdigit())
+        if not task_id or len(task_id) > 40 or not geldig:
+            return web.json_response({"error": "id of datum ongeldig"}, status=400)
+        ok = await asyncio.to_thread(_todoist_deadline, task_id, datum)
         if ok:
             self._cache = None
         return web.json_response({"ok": ok}, status=200 if ok else 502)
@@ -331,11 +360,16 @@ PAGE = """<!doctype html>
   .toevoeg input { width:100%; background:transparent; border:none; border-top:1px solid var(--lijn);
                    color:var(--ink); padding:.55rem .2rem 0; font-size:.98rem; outline:none; }
   .toevoeg input::placeholder { color:var(--dim); }
-  .due { flex:0 0 auto; align-self:center; font-size:.72rem; padding:.12rem .55rem;
-         border-radius:99px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .due { display:inline-block; font-size:.68rem; padding:.06rem .45rem; margin-left:.45rem;
+         border-radius:99px; white-space:nowrap; font-variant-numeric:tabular-nums;
+         vertical-align:baseline; }
   .due.laat { background:rgba(224,122,106,.16); color:var(--rood); font-weight:600; }
   .due.nu { background:rgba(217,164,78,.16); color:var(--amber); font-weight:600; }
   .due.straks { border:1px solid var(--lijn); color:var(--dim); }
+  .duebtn { flex:0 0 auto; align-self:center; width:1.4rem; height:1.4rem; border-radius:50%;
+            border:1px dashed #3a4148; background:none; color:var(--dim); cursor:pointer;
+            font-size:.95rem; line-height:1; padding:0; opacity:.7; }
+  .duebtn:hover, .duebtn:active { color:var(--accent); border-color:var(--accent); opacity:1; }
   .leeg { color:var(--dim); font-style:italic; }
   #jarig li b { color:var(--amber); }
   #melding { position:fixed; left:1.2rem; bottom:1.2rem; max-width:min(360px,80vw);
@@ -465,7 +499,9 @@ async function ververs(){
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
     const taakRij = x => `<li class="vink" onclick="vink(this,'${x.id}')">` +
-      `<span>${esc(x.tekst)}</span>${dueBadge(x.due)}</li>`;
+      `<span>${esc(x.tekst)}${dueBadge(x.due)}</span>` +
+      (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
+        ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
     vul('boodschappen', d.boodschappen, taakRij);
     vul('acties', d.acties, taakRij);
     vul('verjaardagen', d.verjaardagen,
@@ -523,6 +559,26 @@ async function voegToe(ev, lijst, input){
     await ververs();
   } catch(e){ input.value = tekst; toon('Toevoegen lukte even niet — probeer nog eens.'); }
   input.placeholder = '+ toevoegen…';
+}
+async function zetDatum(id, datum){
+  try {
+    const r = await fetch('/api/due', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ id, datum }) });
+    if (!r.ok) throw new Error();
+    await ververs();
+  } catch(e){ toon('Deadline zetten lukte even niet — probeer nog eens.'); }
+}
+function kiesDatum(id){
+  const inp = document.createElement('input');
+  inp.type = 'date'; inp.min = new Date().toISOString().slice(0,10);
+  inp.style.cssText = 'position:fixed;bottom:0;left:0;opacity:0;pointer-events:none';
+  document.body.appendChild(inp);
+  inp.onchange = () => { if (inp.value) zetDatum(id, inp.value); inp.remove(); };
+  try { inp.showPicker(); }
+  catch(e){ inp.remove();
+    const d = prompt('Deadline (JJJJ-MM-DD):');
+    if (d && /^\\d{4}-\\d{2}-\\d{2}$/.test(d.trim())) zetDatum(id, d.trim()); }
 }
 async function vink(el, id){
   el.classList.add('gedaan');

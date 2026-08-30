@@ -207,6 +207,14 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                                   json={"lijst": "acties", "tekst": "band plakken"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 502)  # geen Todoist-token in de test
+                async with s.post("http://127.0.0.1:18811/api/due",
+                                  json={"id": "123", "datum": "morgen"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # alleen JJJJ-MM-DD
+                async with s.post("http://127.0.0.1:18811/api/due",
+                                  json={"id": "123", "datum": "2026-09-05"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 502)  # geen Todoist-token in de test
             self.assertEqual(brain.calls[0][2]["text"], "voeg kwark toe")
         finally:
             await d.stop()
