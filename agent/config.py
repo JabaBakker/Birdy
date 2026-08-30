@@ -59,6 +59,10 @@ class Config:
     )
     drive_inbox_poll_min: int = field(default_factory=lambda: _env_int("AGENT_DRIVE_INBOX_POLL_MIN", 5))
 
+    # Kiosk-dashboard (muurtablet). Token gezet = dashboard aan; ontsluiting via Tailscale.
+    dashboard_token: str = field(default_factory=lambda: os.environ.get("DASHBOARD_TOKEN", ""))
+    dashboard_port: int = field(default_factory=lambda: _env_int("DASHBOARD_PORT", 8811))
+
     agent_name: str = field(default_factory=lambda: os.environ.get("AGENT_NAME", "Fien"))
 
     # Vaste momenten (lokale tijd, HH:MM). Leeg = uit.

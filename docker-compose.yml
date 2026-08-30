@@ -3,6 +3,8 @@ services:
     build: .
     env_file: .env
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8811:8811"   # dashboard, alleen lokaal; ontsluiting via tailscale serve
     volumes:
       - ./workspace:/data/workspace
       - fien-claude-home:/root/.claude

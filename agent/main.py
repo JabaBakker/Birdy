@@ -125,6 +125,9 @@ async def amain() -> None:
     if cfg.slack_bot_token and cfg.slack_app_token:
         from .slack_adapter import SlackAdapter
         adapters.append(SlackAdapter(cfg, brain, work_lock))
+    if cfg.dashboard_token:
+        from .dashboard import Dashboard
+        adapters.append(Dashboard(cfg, brain, work_lock, adapters))
 
     started = []
     for adapter in adapters:

@@ -167,6 +167,34 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p["name"] for p in out], ["Boodschappen", "Acties"])
         self.assertEqual(calls, [None, "abc"])
 
+    async def test_dashboard(self):
+        from agent.dashboard import Dashboard
+        cfg = Config(dashboard_token="geheim", dashboard_port=18811)
+        brain = FakeBrain()
+        d = Dashboard(cfg, brain, asyncio.Lock(), [])
+        await d.start()
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as s:
+                async with s.get("http://127.0.0.1:18811/") as r:
+                    self.assertEqual(r.status, 200)
+                    self.assertIn("Birdy", await r.text())
+                async with s.get("http://127.0.0.1:18811/api/overview") as r:
+                    self.assertEqual(r.status, 401)  # zonder sleutel
+                async with s.get("http://127.0.0.1:18811/api/overview",
+                                 headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 200)
+                    data = await r.json()
+                    for veld in ("agenda", "overzicht", "boodschappen", "acties", "verjaardagen"):
+                        self.assertIn(veld, data)
+                async with s.post("http://127.0.0.1:18811/api/message",
+                                  json={"text": "voeg kwark toe"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual((await r.json())["reply"], "OK-ANTWOORD")
+            self.assertEqual(brain.calls[0][2]["text"], "voeg kwark toe")
+        finally:
+            await d.stop()
+
     def test_gdrive_query_escaping(self):
         from agent import gdrive
         self.assertEqual(gdrive._q("Huis & tuin's"), "Huis & tuin\\'s")
