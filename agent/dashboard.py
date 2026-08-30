@@ -61,7 +61,10 @@ def _overzicht_kort(text: str) -> dict:
             huidig = None
             continue
         if huidig and s.startswith(("•", "-", "*")):
-            secties[huidig].append(s.lstrip("•-* ").strip())
+            item = s.lstrip("•-* ").strip()
+            if item.startswith("(") or item.lower().startswith("niets"):
+                continue  # plaatshouders als "(niets — goed nieuws …)" niet tonen
+            secties[huidig].append(item)
     rest = []
     if secties["🟡"]:
         rest.append(f"{len(secties['🟡'])} voor later")
@@ -226,13 +229,17 @@ PAGE = """<!doctype html>
   #mic { background:var(--panel); border:1px solid #333a41 !important; }
   #mic.luistert { background:var(--amber); animation:pulse 1.2s infinite; }
   @keyframes pulse { 50% { transform:scale(1.06); } }
-  .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); }
+  .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+          align-items:start; }
+  .kolom { display:flex; flex-direction:column; gap:1rem; }
   .panel { background:var(--panel); border-radius:14px; padding:1rem 1.1rem; }
   .panel h2 { font-size:.8rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
               margin-bottom:.6rem; }
-  .panel ul { list-style:none; } .panel li { padding:.26rem 0; font-size:1.02rem; line-height:1.35; }
-  .panel li small { color:var(--dim); margin-right:.55rem; font-variant-numeric:tabular-nums;
-                    display:inline-block; min-width:3.2rem; }
+  .panel ul { list-style:none; padding:0; }
+  .panel li { padding:.26rem 0; font-size:1.02rem; line-height:1.35; display:flex; gap:.55rem;
+              align-items:baseline; }
+  .panel li small { color:var(--dim); font-variant-numeric:tabular-nums; flex:0 0 3.4rem; }
+  .panel li span { flex:1; min-width:0; }
   li.dag { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; color:var(--amber);
            border-top:1px solid var(--lijn); margin-top:.5rem; padding-top:.55rem; }
   li.dag:first-child { border-top:none; margin-top:0; padding-top:0; }
@@ -258,10 +265,12 @@ PAGE = """<!doctype html>
   </div>
   <div class="grid">
     <div class="panel"><h2>📅 Agenda</h2><ul id="agenda"></ul></div>
-    <div class="panel"><h2>📋 Wat loopt er</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
+    <div class="kolom">
+      <div class="panel"><h2>📋 Wat loopt er</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
+      <div class="panel" id="jarig"><h2>🎂 Verjaardagen</h2><ul id="verjaardagen"></ul></div>
+    </div>
     <div class="panel"><h2>🛒 Boodschappen</h2><ul id="boodschappen"></ul></div>
     <div class="panel"><h2>⚡ Acties</h2><ul id="acties"></ul></div>
-    <div class="panel" id="jarig"><h2>🎂 Verjaardagen</h2><ul id="verjaardagen"></ul></div>
   </div>
 </div>
 <div id="antwoord"></div>
@@ -288,7 +297,7 @@ function agendaHtml(items){
   items.forEach(e => { const d = e.wanneer.slice(0,10); (groepen[d] = groepen[d]||[]).push(e); });
   return Object.keys(groepen).sort().map(d =>
     `<li class="dag">${dagLabel(d)}</li>` +
-    groepen[d].map(e => `<li><small>${e.wanneer.length>10 ? e.wanneer.slice(11) : 'hele dag'}</small>${e.titel}</li>`).join('')
+    groepen[d].map(e => `<li><small>${e.wanneer.length>10 ? e.wanneer.slice(11) : 'hele dag'}</small><span>${e.titel}</span></li>`).join('')
   ).join('');
 }
 
@@ -302,15 +311,15 @@ async function ververs(){
     document.getElementById('klok').textContent = d.nu;
     document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
     const t = d.taken || {urgent:[],week:[],rest:''};
-    const rows = t.urgent.map(x => `<li class="urgent">${x}</li>`)
-      .concat(t.week.map(x => `<li class="week">${x}</li>`));
+    const rows = t.urgent.map(x => `<li class="urgent"><span>${x}</span></li>`)
+      .concat(t.week.map(x => `<li class="week"><span>${x}</span></li>`));
     document.getElementById('taken').innerHTML =
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
-    vul('boodschappen', d.boodschappen, x => `<li>• ${x}</li>`);
-    vul('acties', d.acties, x => `<li>• ${x}</li>`);
+    vul('boodschappen', d.boodschappen, x => `<li><span>• ${x}</span></li>`);
+    vul('acties', d.acties, x => `<li><span>• ${x}</span></li>`);
     vul('verjaardagen', d.verjaardagen,
-        j => `<li><small>${j.datum}</small>${j.naam} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></li>`);
+        j => `<li><small>${j.datum}</small><span>${j.naam} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
   } catch (e) { /* volgende poging over 60s */ }
 }
 function toonSleutel(){ document.getElementById('app').style.display='none';
