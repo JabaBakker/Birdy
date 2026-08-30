@@ -82,7 +82,13 @@ def _todoist_lijst(naam: str) -> list[dict]:
     try:
         project = todoist._project(naam)
         tasks = todoist._list_all("/tasks", {"project_id": project["id"]})
-        return [{"id": str(t["id"]), "tekst": t["content"]} for t in tasks][:12]
+        out = [{
+            "id": str(t["id"]),
+            "tekst": t["content"],
+            "due": ((t.get("due") or {}).get("date") or "")[:10],
+        } for t in tasks]
+        out.sort(key=lambda t: (t["due"] == "", t["due"]))  # deadlines eerst, oplopend
+        return out[:12]
     except BaseException:
         return []
 
@@ -325,6 +331,11 @@ PAGE = """<!doctype html>
   .toevoeg input { width:100%; background:transparent; border:none; border-top:1px solid var(--lijn);
                    color:var(--ink); padding:.55rem .2rem 0; font-size:.98rem; outline:none; }
   .toevoeg input::placeholder { color:var(--dim); }
+  .due { flex:0 0 auto; align-self:center; font-size:.72rem; padding:.12rem .55rem;
+         border-radius:99px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .due.laat { background:rgba(224,122,106,.16); color:var(--rood); font-weight:600; }
+  .due.nu { background:rgba(217,164,78,.16); color:var(--amber); font-weight:600; }
+  .due.straks { border:1px solid var(--lijn); color:var(--dim); }
   .leeg { color:var(--dim); font-style:italic; }
   #jarig li b { color:var(--amber); }
   #melding { position:fixed; left:1.2rem; bottom:1.2rem; max-width:min(360px,80vw);
@@ -416,6 +427,18 @@ function dagLabel(d){
   if (diff === 0) return 'Vandaag'; if (diff === 1) return 'Morgen';
   return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'short' });
 }
+function dueBadge(d){
+  if (!d) return '';
+  const dt = new Date(d + 'T00:00'); const nu = new Date(); nu.setHours(0,0,0,0);
+  const diff = Math.round((dt - nu) / 86400000);
+  if (diff < 0)  return `<span class="due laat">te laat</span>`;
+  if (diff === 0) return `<span class="due nu">vandaag</span>`;
+  if (diff === 1) return `<span class="due straks">morgen</span>`;
+  const label = diff < 7
+    ? dt.toLocaleDateString('nl-NL', { weekday:'short' })
+    : dt.toLocaleDateString('nl-NL', { day:'numeric', month:'short' });
+  return `<span class="due straks">${label}</span>`;
+}
 function agendaHtml(items){
   if (!items.length) return '<li class="leeg">niets gepland 🎉</li>';
   const groepen = {};
@@ -441,10 +464,10 @@ async function ververs(){
     document.getElementById('taken').innerHTML =
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
-    vul('boodschappen', d.boodschappen,
-        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${esc(x.tekst)}</span></li>`);
-    vul('acties', d.acties,
-        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${esc(x.tekst)}</span></li>`);
+    const taakRij = x => `<li class="vink" onclick="vink(this,'${x.id}')">` +
+      `<span>${esc(x.tekst)}</span>${dueBadge(x.due)}</li>`;
+    vul('boodschappen', d.boodschappen, taakRij);
+    vul('acties', d.acties, taakRij);
     vul('verjaardagen', d.verjaardagen,
         j => `<li><small>${j.datum}</small><span>${j.naam} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
   } catch (e) { /* volgende poging over 60s */ }
