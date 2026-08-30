@@ -73,15 +73,25 @@ def _overzicht_kort(text: str) -> dict:
     return {"urgent": secties["🔴"][:5], "week": secties["🟠"][:5], "rest": " · ".join(rest)}
 
 
-def _todoist_lijst(naam: str) -> list[str]:
+def _todoist_lijst(naam: str) -> list[dict]:
     from . import todoist
 
     try:
         project = todoist._project(naam)
         tasks = todoist._list_all("/tasks", {"project_id": project["id"]})
-        return [t["content"] for t in tasks][:12]
+        return [{"id": str(t["id"]), "tekst": t["content"]} for t in tasks][:12]
     except BaseException:
         return []
+
+
+def _todoist_afvinken(task_id: str) -> bool:
+    from . import todoist
+
+    try:
+        todoist._request("POST", f"/tasks/{task_id}/close")
+        return True
+    except BaseException:
+        return False
 
 
 def _verjaardagen() -> list[dict]:
@@ -131,6 +141,7 @@ class Dashboard:
         app.router.add_get("/", self.page)
         app.router.add_get("/api/overview", self.overview)
         app.router.add_post("/api/message", self.message)
+        app.router.add_post("/api/done", self.done)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         site = web.TCPSite(self._runner, "0.0.0.0", self.cfg.dashboard_port)
@@ -178,6 +189,21 @@ class Dashboard:
         data = dict(self._cache)
         data["nu"] = datetime.now().strftime("%A %d %B · %H:%M")
         return web.json_response(data)
+
+    async def done(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            task_id = str(body.get("id", "")).strip()
+        except Exception:
+            task_id = ""
+        if not task_id or len(task_id) > 40:
+            return web.json_response({"error": "geen taak-id"}, status=400)
+        ok = await asyncio.to_thread(_todoist_afvinken, task_id)
+        if ok:
+            self._cache = None
+        return web.json_response({"ok": ok}, status=200 if ok else 502)
 
     async def message(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
@@ -246,6 +272,11 @@ PAGE = """<!doctype html>
   li.urgent::before { content:"● "; color:var(--rood); }
   li.week::before { content:"● "; color:var(--amber); }
   .rest { color:var(--dim); font-size:.9rem; margin-top:.5rem; }
+  li.vink { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.32rem .4rem; }
+  li.vink:active { background:rgba(127,191,166,.12); }
+  li.vink::before { content:"◯"; color:var(--accent); font-size:.95rem; }
+  li.vink.gedaan { opacity:.4; text-decoration:line-through; pointer-events:none; }
+  li.vink.gedaan::before { content:"✓"; }
   .leeg { color:var(--dim); font-style:italic; }
   #jarig li b { color:var(--amber); }
   #antwoord { position:fixed; right:1.2rem; bottom:1.2rem; max-width:min(440px,85vw);
@@ -316,8 +347,10 @@ async function ververs(){
     document.getElementById('taken').innerHTML =
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
-    vul('boodschappen', d.boodschappen, x => `<li><span>• ${x}</span></li>`);
-    vul('acties', d.acties, x => `<li><span>• ${x}</span></li>`);
+    vul('boodschappen', d.boodschappen,
+        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${x.tekst}</span></li>`);
+    vul('acties', d.acties,
+        x => `<li class="vink" onclick="vink(this,'${x.id}')"><span>${x.tekst}</span></li>`);
     vul('verjaardagen', d.verjaardagen,
         j => `<li><small>${j.datum}</small><span>${j.naam} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
   } catch (e) { /* volgende poging over 60s */ }
@@ -338,6 +371,19 @@ async function stuur(tekst){
     toon('🐦 ' + (d.reply || d.error || 'er ging iets mis'));
     ververs();
   } catch(e){ toon('🐦 Birdy is even niet bereikbaar.'); }
+}
+async function vink(el, id){
+  el.classList.add('gedaan');
+  try {
+    const r = await fetch('/api/done', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ id }) });
+    if (!r.ok) throw new Error();
+    setTimeout(ververs, 800);
+  } catch(e){
+    el.classList.remove('gedaan');
+    toon('Afvinken lukte even niet — probeer nog eens.');
+  }
 }
 function toon(t){ const a = document.getElementById('antwoord');
   a.textContent = t; a.style.display = 'block';

@@ -191,6 +191,14 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                                   json={"text": "voeg kwark toe"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual((await r.json())["reply"], "OK-ANTWOORD")
+                async with s.post("http://127.0.0.1:18811/api/done", json={"id": "123"}) as r:
+                    self.assertEqual(r.status, 401)  # zonder sleutel
+                async with s.post("http://127.0.0.1:18811/api/done", json={"id": ""},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # leeg id
+                async with s.post("http://127.0.0.1:18811/api/done", json={"id": "123"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 502)  # geen Todoist-token in de test
             self.assertEqual(brain.calls[0][2]["text"], "voeg kwark toe")
         finally:
             await d.stop()
