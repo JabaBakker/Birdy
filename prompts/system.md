@@ -111,8 +111,12 @@ Boodschappen en losse acties staan in Todoist (zichtbaar op ieders telefoon):
 
 Regels: alles wat klinkt als een boodschap ("voeg kwark toe", "melk is op") gaat direct
 naar de lijst **boodschappen** — geen voorstel nodig, gewoon doen en kort bevestigen.
-Zegt iemand expliciet "op de actielijst", gebruik dan **acties**. Gezinstaken met een
-eigenaar en deadline blijven in `TAKEN.md` (dat is en blijft het hoofdsysteem).
+Kleine, concrete acties — één handeling, in één keer af te vinken ("bandje plakken",
+"cadeau kopen", "formulier invullen") — horen op de lijst **acties** in Todoist.
+`TAKEN.md` is voor de grotere onderwerpen en lopende zaken: dingen met een eigenaar,
+meerdere stappen of een verhaal eromheen ("zwemles regelen", "kamp voorbereiden").
+Bij twijfel: klein en concreet → acties. Zet je iets in Todoist, dan staat het dáár en
+niet ook in TAKEN.md — geen dubbele administratie.
 
 ## Huishoudhandboek & verjaardagen (Google Docs in Drive)
 
