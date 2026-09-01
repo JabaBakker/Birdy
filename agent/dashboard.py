@@ -1463,6 +1463,10 @@ function plStart(){
   if (!PLAN.gekozen.length) { toon('Sleep eerst wat kaartjes naar links!'); return; }
   const t = document.getElementById('plVertrek');
   if (t && t.value) PLAN.vertrek = t.value;
+  const nuK = new Date();
+  if (hmNaarMin(PLAN.vertrek) <= nuK.getHours() * 60 + nuK.getMinutes() + 1){
+    toon('⏰ De eindtijd is al (bijna) geweest — kies een latere tijd!'); return;
+  }
   PLAN.start = Date.now(); PLAN.af = []; plWaarsch = null; plWaarschVertrek = false;
   plBewaar(); renderPlan(); deuntje();
 }
@@ -1593,24 +1597,25 @@ function balkModel(){
   const r = takenVan(PLAN.dagdeel);
   const startD = new Date(PLAN.start);
   const startMin = startD.getHours() * 60 + startD.getMinutes() + startD.getSeconds() / 60;
-  const somPlanned = PLAN.gekozen.reduce((s, i) => s + r[i].m, 0);
-  let totaal = hmNaarMin(PLAN.vertrek) - startMin;
-  if (totaal < somPlanned + 2) totaal = somPlanned + BONUS.basis;
+  const totaal = Math.max(1, hmNaarMin(PLAN.vertrek) - startMin);  // start → eindtijd, punt
   const nu = (Date.now() - PLAN.start) / 60000;
   const actief = plActief();
-  const segs = []; let vorige = 0;
+  const segs = []; let vorige = 0; let restPlanned = 0;
   PLAN.gekozen.forEach(i => {
     const afRec = PLAN.af.find(a => a.i === i);
     let breed;
     if (afRec){ breed = Math.max(.7, (afRec.t - PLAN.start) / 60000 - vorige); }
-    else if (i === actief){ breed = Math.max(r[i].m, nu - vorige); }
-    else { breed = r[i].m; }
+    else if (i === actief){
+      breed = Math.max(r[i].m, nu - vorige);
+      restPlanned += Math.max(0, r[i].m - (nu - vorige));
+    } else { breed = r[i].m; restPlanned += r[i].m; }
     segs.push({ i, af: !!afRec, actief: i === actief, breed });
     vorige += breed;
   });
-  const bonus = Math.max(0, totaal - vorige);
+  // bonus = wat er van de eindtijd overblijft na de resterende kaartjes (live)
+  const bonus = Math.max(0, (totaal - nu) - restPlanned);
   segs.push({ bonus: true, breed: Math.max(bonus, 0.01) });
-  return { segs, totaal: Math.max(totaal, vorige + 0.01), nu, bonusMin: Math.round(bonus) };
+  return { segs, totaal, nu, bonusMin: Math.round(bonus) };
 }
 function renderBalk(el, r, kop){
   const m = balkModel();
@@ -1737,8 +1742,9 @@ function plVier(ev, i){
   renderPlan();
   if (PLAN.af.length === PLAN.gekozen.length){
     const einde = document.getElementById('plKlaar');
+    const eindBonus = PLAN.versie === 'balk' ? balkModel().bonusMin : bonusMinuten();
     einde.querySelector('p').textContent =
-      `Alles is af — je hebt ${bonusMinuten()} minuten ${BONUS.n.toLowerCase()} verdiend!`;
+      `Alles is af — je hebt ${eindBonus} minuten ${BONUS.n.toLowerCase()} verdiend!`;
     einde.style.display = 'flex';
     confetti(innerWidth / 2, innerHeight / 3, 220);
     fanfare();
