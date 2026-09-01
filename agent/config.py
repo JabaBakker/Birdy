@@ -62,6 +62,11 @@ class Config:
     # Kiosk-dashboard (muurtablet). Token gezet = dashboard aan; ontsluiting via Tailscale.
     dashboard_token: str = field(default_factory=lambda: os.environ.get("DASHBOARD_TOKEN", ""))
     dashboard_port: int = field(default_factory=lambda: _env_int("DASHBOARD_PORT", 8811))
+    # Namen voor de kleurcodering in de weekweergave (komma-gescheiden)
+    dashboard_personen: list[str] = field(default_factory=lambda: [
+        x.strip() for x in os.environ.get("DASHBOARD_PERSONEN", "Jaap,Yvette,Evi,Chloë").split(",")
+        if x.strip()
+    ])
 
     agent_name: str = field(default_factory=lambda: os.environ.get("AGENT_NAME", "Fien"))
 

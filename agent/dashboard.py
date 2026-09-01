@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from aiohttp import web
@@ -28,24 +29,72 @@ log = logging.getLogger("fien.dashboard")
 CACHE_TTL = 120  # seconden
 
 
-def _agenda() -> list[dict]:
-    from . import gcal
+def _agenda_rijk(days: int = 7) -> list[dict]:
+    """Afspraken mét eindtijd, voor de weekweergave. [{start, eind, titel}] (ISO)."""
+    events: list[dict] = []
+    try:
+        from . import gcal
+        if os.environ.get("GOOGLE_CALENDAR_ID"):
+            svc = gcal._service()
+            now = datetime.now()
+            resp = svc.events().list(
+                calendarId=os.environ["GOOGLE_CALENDAR_ID"],
+                timeMin=now.astimezone().isoformat(),
+                timeMax=(now + timedelta(days=days)).astimezone().isoformat(),
+                singleEvents=True, orderBy="startTime", maxResults=60,
+            ).execute()
+            for ev in resp.get("items", []):
+                s, e = ev.get("start", {}), ev.get("end", {})
+                events.append({
+                    "start": (s.get("dateTime") or s.get("date", ""))[:16],
+                    "eind": (e.get("dateTime") or e.get("date", ""))[:16],
+                    "titel": ev.get("summary", "(zonder titel)"),
+                })
+    except BaseException:  # SystemExit van de CLI-helpers telt ook
+        pass
+    try:
+        url = os.environ.get("FAMILYWALL_ICS_URL", "")
+        if url:
+            import icalendar
+            import recurring_ical_events
+            import requests
 
-    rows: list[tuple[str, str]] = []
-    for fn in (gcal._google_events, gcal._familywall_events):
-        try:
-            rows.extend(fn(7))
-        except BaseException:  # SystemExit van de CLI-helpers telt ook
-            pass
-    seen, out = set(), []
-    for when, line in sorted(rows):
-        norm = line.replace(" (FamilyWall)", "")
-        if norm in seen:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            cal = icalendar.Calendar.from_ical(resp.content)
+            now = datetime.now()
+
+            def iso(v) -> str:
+                if isinstance(v, datetime):
+                    return v.strftime("%Y-%m-%dT%H:%M")
+                return v.strftime("%Y-%m-%d") if v else ""
+
+            for ev in recurring_ical_events.of(cal).between(now, now + timedelta(days=days)):
+                start = ev.get("DTSTART").dt
+                eind = ev.get("DTEND")
+                events.append({
+                    "start": iso(start),
+                    "eind": iso(eind.dt if eind else None) or iso(start),
+                    "titel": str(ev.get("SUMMARY", "(zonder titel)")),
+                })
+    except BaseException:
+        pass
+    # zelfde moment + titel uit beide bronnen → één keer
+    seen, uniek = set(), []
+    for ev in sorted(events, key=lambda e: e["start"]):
+        key = (ev["start"], ev["titel"].strip().lower())
+        if key in seen:
             continue
-        seen.add(norm)
-        titel = line.split(" | ", 1)[1] if " | " in line else line
-        out.append({"wanneer": when, "titel": titel.replace(" (FamilyWall)", "")})
-    return out[:22]
+        seen.add(key)
+        uniek.append(ev)
+    return uniek[:60]
+
+
+def _agenda_compact(rijk: list[dict]) -> list[dict]:
+    return [{
+        "wanneer": ev["start"].replace("T", " "),
+        "titel": ev["titel"],
+    } for ev in rijk][:22]
 
 
 def _overzicht_kort(text: str) -> dict:
@@ -213,15 +262,17 @@ class Dashboard:
             return web.json_response({"error": "geen toegang"}, status=401)
         if not self._cache or time.time() - self._cache_ts > CACHE_TTL:
             overzicht_pad = self.cfg.workspace / "OVERZICHT.md"
-            agenda, boodschappen, acties, jarigen = await asyncio.gather(
-                asyncio.to_thread(_agenda),
+            week, boodschappen, acties, jarigen = await asyncio.gather(
+                asyncio.to_thread(_agenda_rijk),
                 asyncio.to_thread(_todoist_lijst, "boodschappen"),
                 asyncio.to_thread(_todoist_lijst, "acties"),
                 asyncio.to_thread(_verjaardagen),
             )
             overzicht = overzicht_pad.read_text() if overzicht_pad.exists() else ""
             self._cache = {
-                "agenda": agenda,
+                "agenda": _agenda_compact(week),
+                "week": week,
+                "personen": self.cfg.dashboard_personen,
                 "taken": _overzicht_kort(overzicht),
                 "boodschappen": boodschappen,
                 "acties": acties,
@@ -319,106 +370,143 @@ PAGE = """<!doctype html>
           --amber:#d9a44e; --rood:#e07a6a; --lijn:#2a2f35; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,sans-serif;
-         padding:1.2rem; min-height:100vh; }
-  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:.9rem; }
-  header h1 { font-size:1.4rem; display:flex; align-items:center; gap:.55rem; }
+         padding:1.1rem; min-height:100vh; font-size:15px; }
+  header { display:flex; align-items:center; gap:1.2rem; margin-bottom:.85rem; }
+  header h1 { font-size:1.3rem; display:flex; align-items:center; gap:.5rem; }
   header h1 span { color:var(--accent); }
-  header img { height:2.3rem; }
-  #klok { color:var(--dim); font-size:1.05rem; text-transform:capitalize; }
+  header img { height:2.1rem; }
+  #tabs { display:flex; gap:.35rem; background:var(--panel); border-radius:99px; padding:.25rem; }
+  #tabs button { border:none; background:none; color:var(--dim); font-size:.92rem; cursor:pointer;
+                 padding:.4rem 1rem; border-radius:99px; }
+  #tabs button.actief { background:var(--accent); color:#14171a; font-weight:600; }
+  #klok { color:var(--dim); font-size:1rem; text-transform:capitalize; margin-left:auto; }
   #tekstinvoer { display:flex; gap:.5rem; margin-bottom:1rem; }
   #tekstinvoer input { flex:1; background:var(--panel); border:1px solid #333a41; border-radius:12px;
-                       color:var(--ink); padding:.85rem 1rem; font-size:1.05rem; }
-  #tekstinvoer button { border:none; border-radius:12px; padding:0 1.2rem; font-size:1.3rem;
+                       color:var(--ink); padding:.75rem 1rem; font-size:1rem; }
+  #tekstinvoer button { border:none; border-radius:12px; padding:0 1.1rem; font-size:1.2rem;
                         cursor:pointer; }
   #stuurknop { background:var(--accent); color:#14171a; }
   .micknop { background:var(--panel); border:1px solid #333a41 !important; }
   .micknop.luistert { background:var(--amber); animation:pulse 1.2s infinite; }
   @keyframes pulse { 50% { transform:scale(1.06); } }
-  .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+  .grid { display:grid; gap:.9rem; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
           align-items:start; }
-  .kolom { display:flex; flex-direction:column; gap:1rem; }
-  .panel { background:var(--panel); border-radius:14px; padding:1rem 1.1rem; }
-  .panel h2 { font-size:.8rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
-              margin-bottom:.6rem; }
+  .kolom { display:flex; flex-direction:column; gap:.9rem; }
+  .panel { background:var(--panel); border-radius:14px; padding:.9rem 1rem; }
+  .panel h2 { font-size:.76rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
+              margin-bottom:.55rem; }
+  .panel h2.klik { cursor:pointer; }
   .panel ul { list-style:none; padding:0; }
-  .panel li { padding:.26rem 0; font-size:1.02rem; line-height:1.35; display:flex; gap:.55rem;
+  .panel li { padding:.24rem 0; font-size:.95rem; line-height:1.35; display:flex; gap:.5rem;
               align-items:baseline; }
-  .panel li small { color:var(--dim); font-variant-numeric:tabular-nums; flex:0 0 3.4rem; }
+  .panel li small { color:var(--dim); font-variant-numeric:tabular-nums; flex:0 0 3.1rem; }
   .panel li span { flex:1; min-width:0; }
-  li.dag { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; color:var(--amber);
-           border-top:1px solid var(--lijn); margin-top:.5rem; padding-top:.55rem; }
+  li.dag { font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; color:var(--amber);
+           border-top:1px solid var(--lijn); margin-top:.45rem; padding-top:.5rem; }
   li.dag:first-child { border-top:none; margin-top:0; padding-top:0; }
   li.urgent::before { content:"● "; color:var(--rood); }
   li.week::before { content:"● "; color:var(--amber); }
-  .rest { color:var(--dim); font-size:.9rem; margin-top:.5rem; }
-  li.vink { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.32rem .4rem; }
+  .rest { color:var(--dim); font-size:.85rem; margin-top:.45rem; }
+  li.vink { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.3rem .4rem; }
   li.vink:active { background:rgba(127,191,166,.12); }
-  li.vink::before { content:"◯"; color:var(--accent); font-size:.95rem; }
+  li.vink::before { content:"◯"; color:var(--accent); font-size:.9rem; }
   li.vink.gedaan { opacity:.4; text-decoration:line-through; pointer-events:none; }
   li.vink.gedaan::before { content:"✓"; }
-  .toevoeg { margin-top:.55rem; }
+  .toevoeg { margin-top:.5rem; }
   .toevoeg input { width:100%; background:transparent; border:none; border-top:1px solid var(--lijn);
-                   color:var(--ink); padding:.55rem .2rem 0; font-size:.98rem; outline:none; }
+                   color:var(--ink); padding:.5rem .2rem 0; font-size:.92rem; outline:none; }
   .toevoeg input::placeholder { color:var(--dim); }
-  .due { display:inline-block; font-size:.68rem; padding:.06rem .45rem; margin-left:.45rem;
-         border-radius:99px; white-space:nowrap; font-variant-numeric:tabular-nums;
-         vertical-align:baseline; }
+  .due { display:inline-block; font-size:.66rem; padding:.05rem .42rem; margin-left:.4rem;
+         border-radius:99px; white-space:nowrap; font-variant-numeric:tabular-nums; }
   .due.laat { background:rgba(224,122,106,.16); color:var(--rood); font-weight:600; }
   .due.nu { background:rgba(217,164,78,.16); color:var(--amber); font-weight:600; }
   .due.straks { border:1px solid var(--lijn); color:var(--dim); }
-  .duebtn { flex:0 0 auto; align-self:center; width:1.4rem; height:1.4rem; border-radius:50%;
+  .duebtn { flex:0 0 auto; align-self:center; width:1.35rem; height:1.35rem; border-radius:50%;
             border:1px dashed #3a4148; background:none; color:var(--dim); cursor:pointer;
-            font-size:.95rem; line-height:1; padding:0; opacity:.7; }
+            font-size:.9rem; line-height:1; padding:0; opacity:.7; }
   .duebtn:hover, .duebtn:active { color:var(--accent); border-color:var(--accent); opacity:1; }
   .leeg { color:var(--dim); font-style:italic; }
   #jarig li b { color:var(--amber); }
-  #melding { position:fixed; left:1.2rem; bottom:1.2rem; max-width:min(360px,80vw);
+  /* ── weekweergave ── */
+  #paneelWeek { display:none; }
+  .wkwrap { overflow-x:auto; }
+  .wk { display:grid; grid-template-columns:2.6rem repeat(7, minmax(120px,1fr)); gap:.35rem;
+        min-width:920px; }
+  .wk .kop { text-align:center; font-size:.74rem; letter-spacing:.06em; text-transform:uppercase;
+             color:var(--dim); padding:.3rem 0; }
+  .wk .kop.vandaag { color:var(--accent); font-weight:700; }
+  .wk .heledag { min-height:1.6rem; display:flex; flex-direction:column; gap:.25rem; }
+  .chip { font-size:.72rem; padding:.18rem .45rem; border-radius:7px; line-height:1.25;
+          background:rgba(127,191,166,.14); border-left:3px solid var(--accent); cursor:pointer;
+          overflow:hidden; }
+  .tijdvak { position:relative; background:var(--panel); border-radius:10px; height:510px; }
+  .uurlijn { position:absolute; left:0; right:0; border-top:1px solid rgba(255,255,255,.045); }
+  .uuras { position:relative; height:510px; }
+  .uuras div { position:absolute; right:.35rem; font-size:.66rem; color:var(--dim);
+               transform:translateY(-50%); font-variant-numeric:tabular-nums; }
+  .blok { position:absolute; left:3px; right:3px; border-radius:7px; padding:.15rem .4rem;
+          font-size:.72rem; line-height:1.2; overflow:hidden; cursor:pointer;
+          border-left:3px solid; }
+  .blok b { display:block; font-weight:600; }
+  .blok small { color:inherit; opacity:.75; font-size:.64rem; }
+  .blok.conflict { outline:1.5px solid var(--rood); }
+  .legenda { display:flex; gap:1rem; flex-wrap:wrap; margin:.6rem .2rem 0; font-size:.78rem;
+             color:var(--dim); }
+  .legenda i { display:inline-block; width:.7rem; height:.7rem; border-radius:3px;
+               margin-right:.35rem; vertical-align:-1px; }
+  #melding { position:fixed; left:1.2rem; bottom:1.2rem; max-width:min(380px,80vw);
              background:var(--panel); border:1px solid var(--amber); border-radius:12px;
-             padding:.7rem .9rem; font-size:.95rem; display:none; z-index:60; }
-  #chatfab { position:fixed; right:1.2rem; bottom:1.2rem; width:66px; height:66px; border-radius:50%;
-             border:none; background:var(--accent); cursor:pointer; z-index:40; font-size:1.8rem;
+             padding:.7rem .9rem; font-size:.92rem; display:none; z-index:60; }
+  #chatfab { position:fixed; right:1.2rem; bottom:1.2rem; width:64px; height:64px; border-radius:50%;
+             border:none; background:var(--accent); cursor:pointer; z-index:40; font-size:1.7rem;
              box-shadow:0 4px 20px rgba(0,0,0,.45); display:flex; align-items:center;
              justify-content:center; }
-  #chatfab img { height:2.4rem; }
+  #chatfab img { height:2.3rem; }
   #chat { position:fixed; right:1.2rem; bottom:1.2rem; width:min(400px,92vw);
           height:min(580px,80vh); background:var(--panel); border:1px solid var(--lijn);
           border-radius:16px; display:none; flex-direction:column; z-index:50;
           box-shadow:0 10px 40px rgba(0,0,0,.55); }
   #chat.open { display:flex; }
-  #chatkop { display:flex; align-items:center; gap:.6rem; padding:.75rem 1rem;
+  #chatkop { display:flex; align-items:center; gap:.6rem; padding:.7rem 1rem;
              border-bottom:1px solid var(--lijn); font-weight:600; }
-  #chatkop img { height:1.7rem; }
+  #chatkop img { height:1.6rem; }
   #chatkop button { margin-left:auto; background:none; border:none; color:var(--dim);
-                    font-size:1.25rem; cursor:pointer; }
-  #chatlog { flex:1; overflow-y:auto; padding:.9rem; display:flex; flex-direction:column; gap:.5rem; }
-  .bub { max-width:85%; padding:.55rem .85rem; border-radius:14px; font-size:.98rem;
+                    font-size:1.2rem; cursor:pointer; }
+  #chatlog { flex:1; overflow-y:auto; padding:.85rem; display:flex; flex-direction:column; gap:.5rem; }
+  .bub { max-width:85%; padding:.5rem .8rem; border-radius:14px; font-size:.95rem;
          line-height:1.45; white-space:pre-wrap; overflow-wrap:break-word; }
   .bub.ik { align-self:flex-end; background:var(--accent); color:#14171a;
             border-bottom-right-radius:4px; }
   .bub.birdy { align-self:flex-start; background:#262b31; border-bottom-left-radius:4px; }
   .bub.wacht { color:var(--dim); font-style:italic; }
-  #chatinvoer { display:flex; gap:.45rem; padding:.7rem; border-top:1px solid var(--lijn); }
+  #chatinvoer { display:flex; gap:.45rem; padding:.65rem; border-top:1px solid var(--lijn); }
   #chatinvoer input { flex:1; background:var(--bg); border:1px solid #333a41; border-radius:10px;
-                      color:var(--ink); padding:.6rem .8rem; font-size:1rem; }
-  #chatinvoer button { border:none; border-radius:10px; padding:0 .9rem; font-size:1.15rem;
+                      color:var(--ink); padding:.55rem .8rem; font-size:.95rem; }
+  #chatinvoer button { border:none; border-radius:10px; padding:0 .85rem; font-size:1.1rem;
                        cursor:pointer; background:var(--accent); color:#14171a; }
   #sleutel { display:none; padding:2rem; text-align:center; }
-  #sleutel input { font-size:1.1rem; padding:.6rem; border-radius:8px; border:1px solid #444; }
+  #sleutel input { font-size:1.05rem; padding:.6rem; border-radius:8px; border:1px solid #444; }
 </style></head><body>
 <div id="sleutel">
   <img src="/logo.png" alt="Birdy" style="max-height:200px" onerror="this.style.display='none'"><br><br>
   <p>Vul de dashboard-sleutel in (staat in de .env op de server):</p><br>
   <input id="sleutelveld" placeholder="sleutel"> <button onclick="zetSleutel()">Opslaan</button></div>
 <div id="app" style="display:none">
-  <header><h1><img src="/logo-bird.png" alt="" onerror="this.replaceWith('🐦')"><span>Birdy</span></h1>
-    <div id="klok"></div></header>
+  <header>
+    <h1><img src="/logo-bird.png" alt="" onerror="this.replaceWith('🐦')"><span>Birdy</span></h1>
+    <div id="tabs">
+      <button id="tabVandaag" class="actief" onclick="kiesTab('vandaag')">Vandaag</button>
+      <button id="tabWeek" onclick="kiesTab('week')">Week</button>
+    </div>
+    <div id="klok"></div>
+  </header>
   <div id="tekstinvoer">
     <input id="invoer" placeholder="Zeg of typ iets tegen Birdy — “voeg kwark toe aan de boodschappen”">
     <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
     <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
   </div>
-  <div class="grid">
-    <div class="panel"><h2>📅 Agenda</h2><ul id="agenda"></ul></div>
+  <div class="grid" id="paneelVandaag">
+    <div class="panel"><h2 class="klik" onclick="kiesTab('week')" title="Naar weekoverzicht">📅 Agenda ↗</h2><ul id="agenda"></ul></div>
     <div class="kolom">
       <div class="panel"><h2>📋 Wat loopt er</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
       <div class="panel" id="jarig"><h2>🎂 Verjaardagen</h2><ul id="verjaardagen"></ul></div>
@@ -429,6 +517,10 @@ PAGE = """<!doctype html>
     <div class="panel"><h2>⚡ Acties</h2><ul id="acties"></ul>
       <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
         onkeydown="voegToe(event,'acties',this)"></div></div>
+  </div>
+  <div id="paneelWeek">
+    <div class="wkwrap"><div class="wk" id="wkgrid"></div></div>
+    <div class="legenda" id="legenda"></div>
   </div>
 </div>
 <div id="melding"></div>
@@ -452,14 +544,32 @@ if (q) { KEY = q; try { localStorage.setItem('birdy-key', q); } catch (e) {} }
 function zetSleutel(){ KEY = document.getElementById('sleutelveld').value.trim();
   try { localStorage.setItem('birdy-key', KEY); } catch(e){} ververs(); }
 
+function kiesTab(t){
+  document.getElementById('paneelVandaag').style.display = t === 'vandaag' ? 'grid' : 'none';
+  document.getElementById('paneelWeek').style.display = t === 'week' ? 'block' : 'none';
+  document.getElementById('tabVandaag').classList.toggle('actief', t === 'vandaag');
+  document.getElementById('tabWeek').classList.toggle('actief', t === 'week');
+  try { localStorage.setItem('birdy-tab', t); } catch(e){}
+}
+
 function vul(id, items, maak){ const el = document.getElementById(id);
   el.innerHTML = items.length ? items.map(maak).join('') : '<li class="leeg">niets 🎉</li>'; }
+function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 function dagLabel(d){
   const dt = new Date(d + 'T00:00'); const nu = new Date(); nu.setHours(0,0,0,0);
   const diff = Math.round((dt - nu) / 86400000);
   if (diff === 0) return 'Vandaag'; if (diff === 1) return 'Morgen';
   return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'short' });
+}
+function agendaHtml(items){
+  if (!items.length) return '<li class="leeg">niets gepland 🎉</li>';
+  const groepen = {};
+  items.forEach(e => { const d = e.wanneer.slice(0,10); (groepen[d] = groepen[d]||[]).push(e); });
+  return Object.keys(groepen).sort().map(d =>
+    `<li class="dag">${dagLabel(d)}</li>` +
+    groepen[d].map(e => `<li><small>${e.wanneer.length>10 ? e.wanneer.slice(11) : 'hele dag'}</small><span>${esc(e.titel)}</span></li>`).join('')
+  ).join('');
 }
 function dueBadge(d){
   if (!d) return '';
@@ -473,15 +583,86 @@ function dueBadge(d){
     : dt.toLocaleDateString('nl-NL', { day:'numeric', month:'short' });
   return `<span class="due straks">${label}</span>`;
 }
-function agendaHtml(items){
-  if (!items.length) return '<li class="leeg">niets gepland 🎉</li>';
-  const groepen = {};
-  items.forEach(e => { const d = e.wanneer.slice(0,10); (groepen[d] = groepen[d]||[]).push(e); });
-  return Object.keys(groepen).sort().map(d =>
-    `<li class="dag">${dagLabel(d)}</li>` +
-    groepen[d].map(e => `<li><small>${e.wanneer.length>10 ? e.wanneer.slice(11) : 'hele dag'}</small><span>${e.titel}</span></li>`).join('')
-  ).join('');
+
+// ── weekweergave ──────────────────────────────────────────────────────────
+const KLEUREN = ['#7fbfa6', '#d9a44e', '#e07a6a', '#8ab4d8', '#b39ddb', '#f2a1c2'];
+let PERSONEN = [];
+function kleurVoor(titel){
+  const t = titel.toLowerCase();
+  for (let i = 0; i < PERSONEN.length; i++)
+    if (t.includes(PERSONEN[i].toLowerCase())) return KLEUREN[i % KLEUREN.length];
+  return '#5b6570';
 }
+const U0 = 7, U1 = 22, HOOG = 510, PPU = HOOG / (U1 - U0);
+function minuten(iso){ return parseInt(iso.slice(11,13),10)*60 + parseInt(iso.slice(14,16),10); }
+function renderWeek(events){
+  const grid = document.getElementById('wkgrid');
+  const delen = bouwWeek(events);
+  grid.innerHTML = delen;
+  const leg = document.getElementById('legenda');
+  leg.innerHTML = PERSONEN.map((p,i) =>
+    `<span><i style="background:${KLEUREN[i%KLEUREN.length]}"></i>${esc(p)}</span>`).join('') +
+    `<span><i style="background:#5b6570"></i>overig</span><span>⚠ rode rand = overlap</span>`;
+}
+function bouwWeek(events){
+  const dagen = {}; const start = new Date(); start.setHours(0,0,0,0);
+  const volgorde = [];
+  for (let i = 0; i < 7; i++){
+    const d = new Date(start); d.setDate(d.getDate() + i);
+    const key = d.toLocaleDateString('sv-SE');
+    volgorde.push(key); dagen[key] = { datum:d, heledag:[], tijd:[] };
+  }
+  events.forEach(e => {
+    const d = e.start.slice(0,10); if (!(d in dagen)) return;
+    (e.start.length <= 10 ? dagen[d].heledag : dagen[d].tijd).push(e);
+  });
+  let html = '<div></div>';
+  volgorde.forEach((key, i) => {
+    const g = dagen[key];
+    const label = i === 0 ? 'Vandaag'
+      : g.datum.toLocaleDateString('nl-NL', { weekday:'short', day:'numeric' });
+    html += `<div class="kop${i===0?' vandaag':''}">${label}</div>`;
+  });
+  html += '<div></div>';
+  volgorde.forEach(key => {
+    const g = dagen[key];
+    html += `<div class="heledag">` + g.heledag.map(e => {
+      const k = kleurVoor(e.titel);
+      return `<div class="chip" style="border-color:${k};background:${k}22"` +
+        ` onclick="detail('${esc(e.titel).replace(/'/g,'&#39;')}','hele dag')">${esc(e.titel)}</div>`;
+    }).join('') + `</div>`;
+  });
+  let uuras = '<div class="uuras">';
+  for (let u = U0; u <= U1; u += 2)
+    uuras += `<div style="top:${(u-U0)*PPU}px">${String(u).padStart(2,'0')}</div>`;
+  html += uuras + '</div>';
+  volgorde.forEach(key => {
+    const g = dagen[key];
+    const t = g.tijd.map(e => ({ ...e, s: minuten(e.start),
+      e: (e.eind && e.eind.length > 10) ? Math.max(minuten(e.eind), minuten(e.start) + 30)
+                                        : minuten(e.start) + 60 }));
+    t.sort((a,b) => a.s - b.s);
+    for (let a = 0; a < t.length; a++) for (let b = a+1; b < t.length; b++)
+      if (t[b].s < t[a].e) { t[a].conflict = t[b].conflict = true; t[b].schuif = true; }
+    let vak = '<div class="tijdvak">';
+    for (let u = U0; u <= U1; u += 2) vak += `<div class="uurlijn" style="top:${(u-U0)*PPU}px"></div>`;
+    t.forEach(e => {
+      const top = Math.max(0, (e.s/60 - U0) * PPU);
+      const hoogte = Math.max(24, Math.min(HOOG - top - 2, (e.e - e.s) / 60 * PPU - 2));
+      const k = kleurVoor(e.titel);
+      const tijd = e.start.slice(11,16) +
+        ((e.eind && e.eind.length > 10) ? '–' + e.eind.slice(11,16) : '');
+      vak += `<div class="blok${e.conflict ? ' conflict' : ''}"` +
+        ` style="top:${top}px;height:${hoogte}px;border-color:${k};background:${k}26;` +
+        `${e.schuif ? 'left:34%;' : (e.conflict ? 'right:34%;' : '')}color:var(--ink)"` +
+        ` onclick="detail('${esc(e.titel).replace(/'/g,'&#39;')}','${tijd}${e.conflict ? ' · ⚠ overlapt' : ''}')">` +
+        `<b>${esc(e.titel)}</b><small>${tijd}</small></div>`;
+    });
+    html += vak + '</div>';
+  });
+  return html;
+}
+function detail(titel, sub){ toon(`📅 ${titel} — ${sub}`); }
 
 async function ververs(){
   try {
@@ -491,10 +672,12 @@ async function ververs(){
     document.getElementById('sleutel').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     document.getElementById('klok').textContent = d.nu;
+    PERSONEN = d.personen || [];
     document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
+    renderWeek(d.week || []);
     const t = d.taken || {urgent:[],week:[],rest:''};
-    const rows = t.urgent.map(x => `<li class="urgent"><span>${x}</span></li>`)
-      .concat(t.week.map(x => `<li class="week"><span>${x}</span></li>`));
+    const rows = t.urgent.map(x => `<li class="urgent"><span>${esc(x)}</span></li>`)
+      .concat(t.week.map(x => `<li class="week"><span>${esc(x)}</span></li>`));
     document.getElementById('taken').innerHTML =
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
@@ -505,15 +688,15 @@ async function ververs(){
     vul('boodschappen', d.boodschappen, taakRij);
     vul('acties', d.acties, taakRij);
     vul('verjaardagen', d.verjaardagen,
-        j => `<li><small>${j.datum}</small><span>${j.naam} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
+        j => `<li><small>${j.datum}</small><span>${esc(j.naam)} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
   } catch (e) { /* volgende poging over 60s */ }
 }
 function toonSleutel(){ document.getElementById('app').style.display='none';
   document.getElementById('sleutel').style.display='block'; }
+try { kiesTab(localStorage.getItem('birdy-tab') || 'vandaag'); } catch(e){ kiesTab('vandaag'); }
 ververs(); setInterval(ververs, 60000);
 
 // ── chat ──────────────────────────────────────────────────────────────────
-function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 let chatGesch = [];
 try { chatGesch = JSON.parse(localStorage.getItem('birdy-chat')) || []; } catch (e) {}
 function chatBewaar(){ try { localStorage.setItem('birdy-chat',
