@@ -152,6 +152,26 @@ def _todoist_afvinken(task_id: str) -> bool:
         return False
 
 
+def _todoist_afgevinkt(naam: str) -> list[dict]:
+    """Onlangs afgevinkte taken (7 dagen) van een project, voor de herstel-lijst."""
+    from datetime import timezone
+
+    from . import todoist
+
+    try:
+        project = todoist._project(naam)
+        nu = datetime.now(timezone.utc)
+        data = todoist._request("GET", "/tasks/completed/by_completion_date", params={
+            "project_id": project["id"],
+            "since": (nu - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "until": nu.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+        items = data.get("items") or data.get("results") or []
+        return [{"id": str(t["id"]), "tekst": t["content"]} for t in items][:6]
+    except BaseException:
+        return []
+
+
 def _todoist_heropen(task_id: str) -> bool:
     from . import todoist
 
@@ -273,11 +293,13 @@ class Dashboard:
             return web.json_response({"error": "geen toegang"}, status=401)
         if not self._cache or time.time() - self._cache_ts > CACHE_TTL:
             overzicht_pad = self.cfg.workspace / "OVERZICHT.md"
-            week, boodschappen, acties, jarigen = await asyncio.gather(
+            week, boodschappen, acties, jarigen, boodschappen_af, acties_af = await asyncio.gather(
                 asyncio.to_thread(_agenda_rijk),
                 asyncio.to_thread(_todoist_lijst, "boodschappen"),
                 asyncio.to_thread(_todoist_lijst, "acties"),
                 asyncio.to_thread(_verjaardagen),
+                asyncio.to_thread(_todoist_afgevinkt, "boodschappen"),
+                asyncio.to_thread(_todoist_afgevinkt, "acties"),
             )
             overzicht = overzicht_pad.read_text() if overzicht_pad.exists() else ""
             self._cache = {
@@ -287,6 +309,8 @@ class Dashboard:
                 "taken": _overzicht_kort(overzicht),
                 "boodschappen": boodschappen,
                 "acties": acties,
+                "boodschappen_af": boodschappen_af,
+                "acties_af": acties_af,
                 "verjaardagen": jarigen,
             }
             self._cache_ts = time.time()
@@ -479,6 +503,14 @@ PAGE = """<!doctype html>
                     font-weight:600; }
   .pers { display:inline-block; font-size:.64rem; padding:.04rem .4rem; margin-left:.4rem;
           border-radius:99px; vertical-align:baseline; }
+  details.af { margin-top:.5rem; }
+  details.af summary { font-size:.78rem; color:var(--dim); cursor:pointer; list-style:none;
+                       padding-top:.4rem; border-top:1px solid var(--lijn); }
+  details.af summary::before { content:"↩ "; }
+  details.af li { color:var(--dim); text-decoration:line-through; font-size:.88rem; }
+  .herstelknop { flex:0 0 auto; align-self:center; border:1px solid var(--lijn); background:none;
+                 color:var(--accent); border-radius:8px; padding:.1rem .5rem; cursor:pointer;
+                 font-size:.85rem; }
   #chatfab { position:fixed; right:1.2rem; bottom:1.2rem; width:64px; height:64px; border-radius:50%;
              border:none; background:var(--accent); cursor:pointer; z-index:40; font-size:1.7rem;
              box-shadow:0 4px 20px rgba(0,0,0,.45); display:flex; align-items:center;
@@ -535,10 +567,14 @@ PAGE = """<!doctype html>
     </div>
     <div class="panel"><h2>🛒 Boodschappen</h2><ul id="boodschappen"></ul>
       <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
-        onkeydown="voegToe(event,'boodschappen',this)"></div></div>
+        onkeydown="voegToe(event,'boodschappen',this)"></div>
+      <details class="af" id="boodschappenAfWrap"><summary>onlangs afgevinkt</summary>
+        <ul id="boodschappenAf"></ul></details></div>
     <div class="panel"><h2>⚡ Acties</h2><ul id="acties"></ul>
       <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
-        onkeydown="voegToe(event,'acties',this)"></div></div>
+        onkeydown="voegToe(event,'acties',this)"></div>
+      <details class="af" id="actiesAfWrap"><summary>onlangs afgevinkt</summary>
+        <ul id="actiesAf"></ul></details></div>
   </div>
   <div id="paneelWeek">
     <div class="wkwrap"><div class="wk" id="wkgrid"></div></div>
@@ -721,6 +757,13 @@ async function ververs(){
     };
     vul('boodschappen', d.boodschappen, taakRij);
     vul('acties', d.acties, taakRij);
+    const afRij = x => `<li><span>${esc(x.tekst)}</span>` +
+      `<button class="herstelknop" title="terugzetten" onclick="herstel('${x.id}')">↩</button></li>`;
+    [['boodschappen', d.boodschappen_af], ['acties', d.acties_af]].forEach(([naam, items]) => {
+      const wrap = document.getElementById(naam + 'AfWrap');
+      wrap.style.display = (items && items.length) ? 'block' : 'none';
+      document.getElementById(naam + 'Af').innerHTML = (items || []).map(afRij).join('');
+    });
     vul('verjaardagen', d.verjaardagen,
         j => `<li><small>${j.datum}</small><span>${esc(j.naam)} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
   } catch (e) { /* volgende poging over 60s */ }
