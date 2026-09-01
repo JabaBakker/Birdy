@@ -118,9 +118,12 @@ def _agenda_compact(rijk: list[dict]) -> list[dict]:
     } for ev in rijk][:22]
 
 
-def _overzicht_kort(text: str) -> dict:
-    """OVERZICHT.md (chat-format) samenvatten: urgente en deze-week-items + rest-telling."""
-    secties: dict[str, list[str]] = {"🔴": [], "🟠": [], "🟡": [], "⏳": []}
+_OVERZICHT_KOPPEN = (("🔴", "Nu / te laat"), ("🟠", "Deze week"), ("🟡", "Later"),
+                     ("⏳", "Wachten op"))
+
+
+def _overzicht_parse(text: str) -> dict[str, list[str]]:
+    secties: dict[str, list[str]] = {k: [] for k, _ in _OVERZICHT_KOPPEN}
     huidig = None
     for line in text.splitlines():
         s = line.strip()
@@ -138,12 +141,24 @@ def _overzicht_kort(text: str) -> dict:
             if item.startswith("(") or item.lower().startswith("niets"):
                 continue  # plaatshouders als "(niets — goed nieuws …)" niet tonen
             secties[huidig].append(item)
+    return secties
+
+
+def _overzicht_kort(text: str) -> dict:
+    """Samenvatting voor de Vandaag-tab: urgent + deze week + rest-telling."""
+    s = _overzicht_parse(text)
     rest = []
-    if secties["🟡"]:
-        rest.append(f"{len(secties['🟡'])} voor later")
-    if secties["⏳"]:
-        rest.append(f"{len(secties['⏳'])} wachten op")
-    return {"urgent": secties["🔴"][:5], "week": secties["🟠"][:5], "rest": " · ".join(rest)}
+    if s["🟡"]:
+        rest.append(f"{len(s['🟡'])} voor later")
+    if s["⏳"]:
+        rest.append(f"{len(s['⏳'])} wachten op")
+    return {"urgent": s["🔴"][:5], "week": s["🟠"][:5], "rest": " · ".join(rest)}
+
+
+def _overzicht_secties(text: str) -> list[dict]:
+    """Volledige lijst per sectie, voor de verdiepende pagina."""
+    s = _overzicht_parse(text)
+    return [{"kop": f"{k} {naam}", "items": s[k]} for k, naam in _OVERZICHT_KOPPEN if s[k]]
 
 
 def _todoist_lijst(naam: str) -> list[dict]:
@@ -158,7 +173,7 @@ def _todoist_lijst(naam: str) -> list[dict]:
             "due": ((t.get("due") or {}).get("date") or "")[:10],
         } for t in tasks]
         out.sort(key=lambda t: (t["due"] == "", t["due"]))  # deadlines eerst, oplopend
-        return out[:12]
+        return out[:50]  # de Vandaag-tab toont de top; de verdiepende pagina alles
     except BaseException:
         return []
 
@@ -269,9 +284,11 @@ def _verjaardagen() -> list[dict]:
                 volgende = date(vandaag.year + 1, mm, dd)
         except ValueError:
             continue
-        naam = clean[5:].split("·")[0].strip(" ·—-")
-        out.append({"datum": clean[:5], "naam": naam, "dagen": (volgende - vandaag).days})
-    return sorted(out, key=lambda x: x["dagen"])[:5]
+        delen = [d.strip(" ·—-") for d in clean[5:].split("·")]
+        out.append({"datum": clean[:5], "naam": delen[0],
+                    "notitie": " · ".join(d for d in delen[1:] if d and d != "—"),
+                    "dagen": (volgende - vandaag).days})
+    return sorted(out, key=lambda x: x["dagen"])[:30]
 
 
 class Dashboard:
@@ -381,6 +398,7 @@ class Dashboard:
             "week": self._traag["week"],
             "personen": self.cfg.dashboard_personen,
             "taken": _overzicht_kort(overzicht),
+            "overzicht_vol": _overzicht_secties(overzicht),
             "boodschappen": boodschappen,
             "acties": acties,
             "boodschappen_af": boodschappen_af,
@@ -672,6 +690,24 @@ PAGE = """<!doctype html>
                       color:var(--ink); padding:.55rem .8rem; font-size:.95rem; }
   #chatinvoer button { border:none; border-radius:10px; padding:0 .85rem; font-size:1.1rem;
                        cursor:pointer; background:var(--accent); color:#14171a; }
+  li.klik { cursor:pointer; }
+  #l2 { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
+        align-items:center; justify-content:center; z-index:65; }
+  #l2kaart { background:var(--panel); border:1px solid var(--lijn); border-radius:16px;
+             padding:1.1rem 1.3rem; width:min(560px,94vw); max-height:86vh; overflow-y:auto; }
+  #l2kop { display:flex; align-items:baseline; }
+  #l2kop h3 { font-size:1.1rem; }
+  #l2kop button { margin-left:auto; background:none; border:none; color:var(--dim);
+                  font-size:1.2rem; cursor:pointer; }
+  #l2Inhoud h4 { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase;
+                 color:var(--amber); margin:.9rem 0 .35rem; }
+  #l2Inhoud ul { list-style:none; padding:0; }
+  #l2Inhoud li { padding:.28rem 0; font-size:.97rem; line-height:1.4; display:flex;
+                 gap:.5rem; align-items:baseline; }
+  #l2Inhoud li small { color:var(--dim); font-variant-numeric:tabular-nums; flex:0 0 3.1rem; }
+  #l2Inhoud li span { flex:1; min-width:0; }
+  #l2Inhoud .notitie { color:var(--dim); font-style:italic; font-size:.88rem; }
+  #l2Inhoud .afitem span { text-decoration:line-through; color:var(--dim); }
   #detail { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
             align-items:center; justify-content:center; z-index:70; }
   #detailkaart { background:var(--panel); border:1px solid var(--lijn); border-radius:16px;
@@ -707,15 +743,15 @@ PAGE = """<!doctype html>
   <div class="grid" id="paneelVandaag">
     <div class="panel"><h2 class="klik" onclick="kiesTab('week')" title="Naar weekoverzicht">📅 Agenda ↗</h2><ul id="agenda"></ul></div>
     <div class="kolom">
-      <div class="panel"><h2>📋 Wat loopt er</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
-      <div class="panel" id="jarig"><h2>🎂 Verjaardagen</h2><ul id="verjaardagen"></ul></div>
+      <div class="panel"><h2 class="klik" onclick="openL2('taken')">📋 Wat loopt er ↗</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
+      <div class="panel" id="jarig"><h2 class="klik" onclick="openL2('verjaardagen')">🎂 Verjaardagen ↗</h2><ul id="verjaardagen"></ul></div>
     </div>
-    <div class="panel"><h2>🛒 Boodschappen</h2><ul id="boodschappen"></ul>
+    <div class="panel"><h2 class="klik" onclick="openL2('boodschappen')">🛒 Boodschappen ↗</h2><ul id="boodschappen"></ul>
       <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
         onkeydown="voegToe(event,'boodschappen',this)"></div>
       <details class="af" id="boodschappenAfWrap"><summary>onlangs afgevinkt</summary>
         <ul id="boodschappenAf"></ul></details></div>
-    <div class="panel"><h2>⚡ Acties</h2><ul id="acties"></ul>
+    <div class="panel"><h2 class="klik" onclick="openL2('acties')">⚡ Acties ↗</h2><ul id="acties"></ul>
       <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
         onkeydown="voegToe(event,'acties',this)"></div>
       <details class="af" id="actiesAfWrap"><summary>onlangs afgevinkt</summary>
@@ -727,6 +763,12 @@ PAGE = """<!doctype html>
   </div>
 </div>
 <div id="melding"></div>
+<div id="l2" onclick="sluitL2()">
+  <div id="l2kaart" onclick="event.stopPropagation()">
+    <div id="l2kop"><h3 id="l2Titel"></h3><button onclick="sluitL2()" title="Sluiten">✕</button></div>
+    <div id="l2Inhoud"></div>
+  </div>
+</div>
 <div id="detail" onclick="this.style.display='none'">
   <div id="detailkaart" onclick="event.stopPropagation()">
     <h3 id="dTitel"></h3>
@@ -764,7 +806,65 @@ function kiesTab(t){
 
 function vul(id, items, maak){ const el = document.getElementById(id);
   el.innerHTML = items.length ? items.map(maak).join('') : '<li class="leeg">niets 🎉</li>'; }
+function vulMeer(id, items, maak, max, l2){
+  const el = document.getElementById(id);
+  let html = items.length ? items.slice(0, max).map(maak).join('')
+                          : '<li class="leeg">niets 🎉</li>';
+  if (items.length > max)
+    html += `<li class="leeg klik" onclick="openL2('${l2}')">… nog ${items.length - max} — alles ↗</li>`;
+  el.innerHTML = html;
+}
 function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function taakRij(x){
+  const p = persoonMatch(x.tekst);
+  return `<li class="vink"${p ? ` style="--pc:${p.kleur}"` : ''} onclick="vink(this,'${x.id}')">` +
+    `<span>${esc(x.tekst)}${dueBadge(x.due)}</span>` +
+    (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
+      ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
+}
+function afRij(x){
+  return `<li class="afitem"><span>${esc(x.tekst)}</span>` +
+    `<button class="herstelknop" title="terugzetten" onclick="herstel('${x.id}')">↩</button></li>`;
+}
+function jarigRij(j){
+  return `<li><small>${j.datum}</small><span>${esc(j.naam)} ` +
+    `<b>${j.dagen===0 ? 'vandaag! 🎉' : 'over ' + j.dagen + ' dgn'}</b></span></li>`;
+}
+
+// ── verdiepende pagina's (L2) ─────────────────────────────────────────────
+let DATA = null, L2open = null;
+function openL2(naam){ L2open = naam;
+  document.getElementById('l2').style.display = 'flex'; renderL2(); }
+function sluitL2(){ L2open = null; document.getElementById('l2').style.display = 'none'; }
+function renderL2(){
+  if (!L2open || !DATA) return;
+  document.getElementById('l2Titel').textContent = {
+    taken: '📋 Alles wat loopt', boodschappen: '🛒 Boodschappen — alles',
+    acties: '⚡ Acties — alles', verjaardagen: '🎂 Verjaardagen & cadeau-ideeën',
+  }[L2open];
+  let html = '';
+  if (L2open === 'taken'){
+    const secties = DATA.overzicht_vol || [];
+    html = secties.length ? secties.map(s =>
+      `<h4>${esc(s.kop)}</h4><ul>` +
+      s.items.map(x => `<li><span>${esc(x)}${persChip(x)}</span></li>`).join('') + `</ul>`
+    ).join('') : '<p class="leeg">Nog niets — stuur Birdy wat taken!</p>';
+  } else if (L2open === 'boodschappen' || L2open === 'acties'){
+    const items = DATA[L2open] || [];
+    html = '<ul>' + (items.length ? items.map(taakRij).join('')
+                                  : '<li class="leeg">niets 🎉</li>') + '</ul>';
+    const af = DATA[L2open + '_af'] || [];
+    if (af.length) html += '<h4>↩ Onlangs afgevinkt</h4><ul>' + af.map(afRij).join('') + '</ul>';
+  } else if (L2open === 'verjaardagen'){
+    const items = DATA.verjaardagen || [];
+    html = '<ul>' + (items.length ? items.map(j =>
+      `<li><small>${j.datum}</small><span>${esc(j.naam)} ` +
+      `<b>${j.dagen===0 ? 'vandaag! 🎉' : 'over ' + j.dagen + ' dgn'}</b>` +
+      (j.notitie ? `<br><span class="notitie">${esc(j.notitie)}</span>` : '') +
+      `</span></li>`).join('') : '<li class="leeg">nog geen verjaardagen — zeg ze tegen Birdy!</li>') + '</ul>';
+  }
+  document.getElementById('l2Inhoud').innerHTML = html;
+}
 
 function dagLabel(d){
   const dt = new Date(d + 'T00:00'); const nu = new Date(); nu.setHours(0,0,0,0);
@@ -983,6 +1083,7 @@ async function ververs(){
     document.getElementById('sleutel').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     document.getElementById('klok').textContent = d.nu;
+    DATA = d;
     PERSONEN = d.personen || [];
     WEEK = d.week || [];
     document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
@@ -993,24 +1094,15 @@ async function ververs(){
     document.getElementById('taken').innerHTML =
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
-    const taakRij = x => {
-      const p = persoonMatch(x.tekst);
-      return `<li class="vink"${p ? ` style="--pc:${p.kleur}"` : ''} onclick="vink(this,'${x.id}')">` +
-        `<span>${esc(x.tekst)}${dueBadge(x.due)}</span>` +
-        (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
-          ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
-    };
-    vul('boodschappen', d.boodschappen, taakRij);
-    vul('acties', d.acties, taakRij);
-    const afRij = x => `<li><span>${esc(x.tekst)}</span>` +
-      `<button class="herstelknop" title="terugzetten" onclick="herstel('${x.id}')">↩</button></li>`;
+    vulMeer('boodschappen', d.boodschappen || [], taakRij, 12, 'boodschappen');
+    vulMeer('acties', d.acties || [], taakRij, 12, 'acties');
     [['boodschappen', d.boodschappen_af], ['acties', d.acties_af]].forEach(([naam, items]) => {
       const wrap = document.getElementById(naam + 'AfWrap');
       wrap.style.display = (items && items.length) ? 'block' : 'none';
       document.getElementById(naam + 'Af').innerHTML = (items || []).map(afRij).join('');
     });
-    vul('verjaardagen', d.verjaardagen,
-        j => `<li><small>${j.datum}</small><span>${esc(j.naam)} <b>${j.dagen===0?'vandaag! 🎉':'over '+j.dagen+' dgn'}</b></span></li>`);
+    vulMeer('verjaardagen', d.verjaardagen || [], jarigRij, 5, 'verjaardagen');
+    renderL2();
   } catch (e) { /* volgende poging over 60s */ }
 }
 function toonSleutel(){ document.getElementById('app').style.display='none';
