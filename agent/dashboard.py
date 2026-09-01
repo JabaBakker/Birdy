@@ -749,23 +749,35 @@ PAGE = """<!doctype html>
                  color:var(--dim); font-size:1rem; }
   .pl-tijd-rij input { background:var(--panel); border:1px solid #333a41; color:var(--ink);
                        border-radius:10px; padding:.5rem .7rem; font-size:1.15rem; }
-  .pl-balkwrap { position:relative; margin:1.6rem 0 .8rem; }
-  .pl-balk2 { display:flex; height:92px; border-radius:14px; overflow:hidden;
-              border:1px solid var(--lijn); background:var(--panel); }
+  .pl-balkwrap { margin:1.4rem 0 .4rem; }
+  .pl-balk2 { display:flex; gap:.45rem; height:96px; }
   .pl-seg { display:flex; flex-direction:column; align-items:center; justify-content:center;
-            gap:.05rem; font-size:.72rem; border-right:2px solid var(--bg); cursor:pointer;
-            min-width:2.2rem; position:relative; transition:width 1s linear; overflow:hidden;
-            white-space:nowrap; }
-  .pl-seg .em2 { font-size:1.5rem; }
-  .pl-seg.af2 { opacity:.5; cursor:default; }
-  .pl-seg.af2::after { content:"✓"; position:absolute; top:.15rem; right:.3rem;
-                       color:var(--accent); font-weight:700; }
-  .pl-seg.nu2 { box-shadow:inset 0 0 0 3px var(--amber); }
-  .pl-seg.bonus { background:rgba(127,191,166,.22) !important; cursor:default; }
-  .pl-cursor { position:absolute; top:-9px; bottom:-9px; width:3px; background:var(--rood);
-               border-radius:2px; transition:left 1s linear; }
-  .pl-cursor::before { content:"▼"; position:absolute; top:-1.05rem; left:-.42rem;
-                       color:var(--rood); font-size:.8rem; }
+            gap:.1rem; font-size:.74rem; cursor:pointer; min-width:2.6rem; position:relative;
+            overflow:hidden; white-space:nowrap; border-radius:14px; background:var(--panel);
+            border:2px solid var(--lijn); transition:flex-grow 1s linear; }
+  .pl-seg .em2 { font-size:1.6rem; }
+  .pl-seg.af2 { flex:0 0 3.1rem !important; opacity:.55; cursor:default;
+                border-color:var(--accent); }
+  .pl-seg.af2::after { content:"✓"; position:absolute; top:.2rem; right:.35rem;
+                       color:var(--accent); font-weight:800; }
+  .pl-seg.nu2 { border-color:var(--amber); box-shadow:0 5px 16px rgba(0,0,0,.45);
+                transform:translateY(-3px); }
+  .pl-seg.bonus { background:rgba(127,191,166,.16) !important; cursor:default;
+                  border-style:dashed; border-color:var(--accent); }
+  .pl-rail { position:relative; height:9px; background:var(--panel); border-radius:99px;
+             margin:2.1rem .1rem .35rem; border:1px solid var(--lijn); }
+  .pl-rail .vul { position:absolute; left:0; top:0; bottom:0; border-radius:99px;
+                  background:linear-gradient(90deg, var(--accent), var(--amber));
+                  transition:width 1s linear; }
+  .pl-rail .stip { position:absolute; top:50%; transform:translate(-50%,-50%);
+                   width:17px; height:17px; border-radius:50%; background:var(--rood);
+                   border:3px solid var(--bg); transition:left 1s linear; }
+  .pl-rail .nulabel { position:absolute; top:-1.85rem; transform:translateX(-50%);
+                      font-size:.9rem; color:var(--rood); font-weight:800;
+                      font-variant-numeric:tabular-nums; transition:left 1s linear;
+                      white-space:nowrap; }
+  .pl-tijden { display:flex; justify-content:space-between; color:var(--dim);
+               font-size:.9rem; margin:0 .1rem; font-variant-numeric:tabular-nums; }
   .pl-bonuskaart { margin-top:.9rem; background:rgba(127,191,166,.1); border:2px solid var(--accent);
                    border-radius:16px; padding:1rem 1.1rem; display:flex; align-items:center;
                    gap:.9rem; font-size:1.15rem; position:relative; overflow:hidden; }
@@ -1304,7 +1316,10 @@ async function ververs(){
 }
 function toonSleutel(){ document.getElementById('app').style.display='none';
   document.getElementById('sleutel').style.display='block'; }
-try { kiesTab(localStorage.getItem('birdy-tab') || 'vandaag'); } catch(e){ kiesTab('vandaag'); }
+try {  // 'plan' wordt pas hersteld nadat de planningsfuncties geladen zijn (regel onderaan)
+  const t0 = localStorage.getItem('birdy-tab') || 'vandaag';
+  if (t0 !== 'plan') kiesTab(t0);
+} catch(e){ kiesTab('vandaag'); }
 ververs(); setInterval(ververs, 60000);
 
 // ── planning: kinderroutine met slots, drie weergaven en bonus ────────────
@@ -1494,19 +1509,25 @@ function balkModel(){
 }
 function renderBalk(el, r, kop){
   const m = balkModel();
+  const klok = ts => new Date(ts).toTimeString().slice(0, 5);
   el.innerHTML = kop +
-    `<p class="pl-hint">De rode pijl is de klok — blijf hem voor! Alles wat je overhoudt is
+    `<p class="pl-hint">De rode stip is de klok — blijf hem voor! Alles wat je overhoudt is
       ${BONUS.e} bonustijd. Klaar met een taak? Tik erop!</p>` +
     `<div class="pl-balkwrap"><div class="pl-balk2" id="plBalk2">` +
     m.segs.map(s => s.bonus
-      ? `<div class="pl-seg bonus" id="plSegBonus"><span class="em2">${BONUS.e}</span><span id="plBonus"></span></div>`
+      ? `<div class="pl-seg bonus" id="plSegBonus" style="flex:${s.breed} 1 0">
+           <span class="em2">${BONUS.e}</span><span id="plBonus"></span></div>`
       : `<div class="pl-seg${s.af ? ' af2' : ''}${s.actief ? ' nu2' : ''}" data-i="${s.i}"
-           style="background:${KLEUREN[s.i % KLEUREN.length]}30"
+           style="flex:${s.breed} 1 0;background:${KLEUREN[s.i % KLEUREN.length]}26"
            onclick="plVier(event, ${s.i})">
-           <span class="em2">${r[s.i].e}</span><span>${r[s.i].n.split(' ')[0]}</span>
-           <span>${r[s.i].m}m</span></div>`).join('') +
-    `</div><div class="pl-cursor" id="plCursor"></div></div>` +
-    `<div class="pl-tijd-rij"><span>🏁 ${PLAN.dagdeel === 'ochtend' ? 'Vertrek' : 'Bedtijd'}: ${PLAN.vertrek}</span></div>` +
+           <span class="em2">${r[s.i].e}</span>` +
+           (s.af ? '' : `<span>${r[s.i].n.split(' ')[0]}</span><span>${r[s.i].m}m</span>`) +
+         `</div>`).join('') +
+    `</div>
+    <div class="pl-rail"><div class="vul" id="plRailVul"></div>
+      <div class="stip" id="plRailStip"></div><div class="nulabel" id="plRailNu"></div></div>
+    <div class="pl-tijden"><span>▶ ${klok(PLAN.start)}</span>
+      <span>🏁 ${PLAN.dagdeel === 'ochtend' ? 'vertrek' : 'bedtijd'} ${PLAN.vertrek}</span></div></div>` +
     `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
 }
 // ── weergave 3: sterren (blokhoogte = tijd; vroeg klaar = blok krimpt, bonus groeit) ──
@@ -1551,11 +1572,18 @@ function plTick(){
     m.segs.forEach(s => {
       const el = s.bonus ? document.getElementById('plSegBonus')
         : document.querySelector(`.pl-seg[data-i="${s.i}"]`);
-      if (el) el.style.width = (s.breed / m.totaal * 100) + '%';
-      if (el && !s.bonus) el.classList.toggle('nu2', !!s.actief);
+      if (!el) return;
+      if (!s.af) el.style.flexGrow = s.breed;
+      if (!s.bonus) el.classList.toggle('nu2', !!s.actief);
     });
-    const cursor = document.getElementById('plCursor');
-    if (cursor) cursor.style.left = Math.min(99.5, m.nu / m.totaal * 100) + '%';
+    const pct = Math.min(99.3, Math.max(0.7, m.nu / m.totaal * 100)) + '%';
+    const vul = document.getElementById('plRailVul');
+    const stip = document.getElementById('plRailStip');
+    const nulabel = document.getElementById('plRailNu');
+    if (vul) vul.style.width = pct;
+    if (stip) stip.style.left = pct;
+    if (nulabel){ nulabel.style.left = pct;
+      nulabel.textContent = new Date().toTimeString().slice(0, 5); }
     if (bonusEl) bonusEl.textContent = m.bonusMin + ' min';
     // waarschuwing: nog 1 minuut tot vertrek/bedtijd
     const restTot = m.totaal - m.nu;
