@@ -795,9 +795,21 @@ PAGE = """<!doctype html>
   .pl-rail .vul { position:absolute; left:0; top:0; bottom:0; border-radius:99px;
                   background:linear-gradient(90deg, var(--accent), var(--amber));
                   transition:width 1s linear; }
-  .pl-rail .stip { position:absolute; top:50%; transform:translate(-50%,-50%);
-                   width:17px; height:17px; border-radius:50%; background:var(--rood);
-                   border:3px solid var(--bg); transition:left 1s linear; }
+  .pl-rail .stip { position:absolute; top:50%; transform:translate(-50%,-62%);
+                   font-size:1.55rem; line-height:1; transition:left 1s linear;
+                   filter:drop-shadow(0 2px 3px rgba(0,0,0,.55)); }
+  .pl-timer { position:relative; width:180px; margin:1.5rem auto .3rem; }
+  .pl-timer svg { display:block; width:180px; height:180px; }
+  .ringbg { fill:none; stroke:var(--lijn); stroke-width:9; }
+  .ring { fill:none; stroke-width:9; stroke-linecap:round;
+          transition:stroke-dashoffset 1s linear; }
+  .ring.buiten { stroke:var(--accent); }
+  .ring.binnen { stroke:var(--amber); }
+  .ring.op { stroke:var(--rood); }
+  .pl-timer-tekst { position:absolute; inset:0; display:flex; flex-direction:column;
+                    align-items:center; justify-content:center; gap:.15rem; }
+  .pl-timer-tekst b { font-size:1.75rem; font-variant-numeric:tabular-nums; }
+  .pl-timer-tekst span { color:var(--dim); font-size:.82rem; text-align:center; }
   .pl-rail .nulabel { position:absolute; top:-1.85rem; transform:translateX(-50%);
                       font-size:.9rem; color:var(--rood); font-weight:800;
                       font-variant-numeric:tabular-nums; transition:left 1s linear;
@@ -1639,9 +1651,20 @@ function renderBalk(el, r, kop){
            <span>${r[s.i].n.split(' ')[0]}</span><span>${r[s.i].m}m</span></div>`).join('') +
     `</div>
     <div class="pl-rail"><div class="vul" id="plRailVul"></div>
-      <div class="stip" id="plRailStip"></div><div class="nulabel" id="plRailNu"></div></div>
+      <div class="stip" id="plRailStip">🦊</div><div class="nulabel" id="plRailNu"></div></div>
     <div class="pl-tijden"><span>▶ ${klok(PLAN.start)}</span>
       <span>🏁 ${PLAN.dagdeel === 'ochtend' ? 'vertrek' : 'bedtijd'} ${PLAN.vertrek}</span></div></div>` +
+    `<div class="pl-timer">
+      <svg viewBox="0 0 120 120">
+        <circle class="ringbg" cx="60" cy="60" r="52"/>
+        <circle class="ring buiten" id="ringTot" cx="60" cy="60" r="52"
+          transform="rotate(-90 60 60)"/>
+        <circle class="ringbg" cx="60" cy="60" r="40"/>
+        <circle class="ring binnen" id="ringAct" cx="60" cy="60" r="40"
+          transform="rotate(-90 60 60)"/>
+      </svg>
+      <div class="pl-timer-tekst"><b id="timerAct">–:–</b><span id="timerTot"></span></div>
+    </div>` +
     `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
 }
 // ── weergave 3: sterren (blokhoogte = tijd; vroeg klaar = blok krimpt, bonus groeit) ──
@@ -1699,6 +1722,29 @@ function plTick(){
     if (nulabel){ nulabel.style.left = pct;
       nulabel.textContent = new Date().toTimeString().slice(0, 5); }
     if (bonusEl) bonusEl.textContent = m.bonusMin + ' min';
+    // grote timer: buitenring = totaal tot eindtijd, binnenring = huidige taak
+    const ringAct = document.getElementById('ringAct');
+    const ringTot = document.getElementById('ringTot');
+    if (ringAct && ringTot){
+      const CT = 2 * Math.PI * 52, CB = 2 * Math.PI * 40;
+      const totRest = Math.max(0, m.totaal - m.nu);
+      ringTot.style.strokeDasharray = CT;
+      ringTot.style.strokeDashoffset = CT * (1 - totRest / m.totaal);
+      let tekst = '🎉', fracA = 1, op = false;
+      if (actief !== undefined){
+        const actRest = r[actief].m * 60 - (Date.now() - plActiefStart()) / 1000;
+        op = actRest <= 0;
+        fracA = Math.max(0, actRest) / (r[actief].m * 60);
+        const s = Math.max(0, Math.ceil(actRest));
+        tekst = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+      }
+      ringAct.style.strokeDasharray = CB;
+      ringAct.style.strokeDashoffset = CB * (1 - fracA);
+      ringAct.classList.toggle('op', op);
+      document.getElementById('timerAct').textContent = tekst;
+      document.getElementById('timerTot').textContent =
+        actief !== undefined ? 'nog ' + Math.round(totRest) + ' min totaal' : 'alles af!';
+    }
     // waarschuwing: nog 1 minuut tot vertrek/bedtijd
     const restTot = m.totaal - m.nu;
     if (restTot <= 1 && restTot > 0 && !plWaarschVertrek){ plWaarschVertrek = true; attentie(); }
