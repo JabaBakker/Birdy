@@ -241,7 +241,17 @@ class Dashboard:
         self.adapters = adapters
         self._cache: dict | None = None
         self._cache_ts = 0.0
+        self._gen = 0  # verhoogd bij elke mutatie: een lopende (oude) opbouw mag dan niet meer cachen
+        self._traag: dict | None = None  # langzame bronnen (agenda/FamilyWall/Drive), eigen cache
+        self._traag_ts = 0.0
+        self._bouw_lock = asyncio.Lock()
         self._runner: web.AppRunner | None = None
+
+    def _invalidate(self, ook_traag: bool = False) -> None:
+        self._cache = None
+        self._gen += 1
+        if ook_traag:
+            self._traag = None
 
     # -- levenscyclus -------------------------------------------------------
 
@@ -291,32 +301,49 @@ class Dashboard:
     async def overview(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
             return web.json_response({"error": "geen toegang"}, status=401)
-        if not self._cache or time.time() - self._cache_ts > CACHE_TTL:
-            overzicht_pad = self.cfg.workspace / "OVERZICHT.md"
-            week, boodschappen, acties, jarigen, boodschappen_af, acties_af = await asyncio.gather(
-                asyncio.to_thread(_agenda_rijk),
-                asyncio.to_thread(_todoist_lijst, "boodschappen"),
-                asyncio.to_thread(_todoist_lijst, "acties"),
-                asyncio.to_thread(_verjaardagen),
-                asyncio.to_thread(_todoist_afgevinkt, "boodschappen"),
-                asyncio.to_thread(_todoist_afgevinkt, "acties"),
-            )
-            overzicht = overzicht_pad.read_text() if overzicht_pad.exists() else ""
-            self._cache = {
-                "agenda": _agenda_compact(week),
-                "week": week,
-                "personen": self.cfg.dashboard_personen,
-                "taken": _overzicht_kort(overzicht),
-                "boodschappen": boodschappen,
-                "acties": acties,
-                "boodschappen_af": boodschappen_af,
-                "acties_af": acties_af,
-                "verjaardagen": jarigen,
-            }
-            self._cache_ts = time.time()
-        data = dict(self._cache)
+        if self._cache and time.time() - self._cache_ts <= CACHE_TTL:
+            data = dict(self._cache)
+        else:
+            async with self._bouw_lock:
+                if self._cache and time.time() - self._cache_ts <= CACHE_TTL:
+                    data = dict(self._cache)
+                else:
+                    data = await self._bouw()
         data["nu"] = datetime.now().strftime("%A %d %B · %H:%M")
         return web.json_response(data)
+
+    async def _bouw(self) -> dict:
+        gen = self._gen
+        if not self._traag or time.time() - self._traag_ts > CACHE_TTL:
+            week, jarigen = await asyncio.gather(
+                asyncio.to_thread(_agenda_rijk),
+                asyncio.to_thread(_verjaardagen),
+            )
+            self._traag = {"week": week, "verjaardagen": jarigen}
+            self._traag_ts = time.time()
+        boodschappen, acties, boodschappen_af, acties_af = await asyncio.gather(
+            asyncio.to_thread(_todoist_lijst, "boodschappen"),
+            asyncio.to_thread(_todoist_lijst, "acties"),
+            asyncio.to_thread(_todoist_afgevinkt, "boodschappen"),
+            asyncio.to_thread(_todoist_afgevinkt, "acties"),
+        )
+        overzicht_pad = self.cfg.workspace / "OVERZICHT.md"
+        overzicht = overzicht_pad.read_text() if overzicht_pad.exists() else ""
+        vers = {
+            "agenda": _agenda_compact(self._traag["week"]),
+            "week": self._traag["week"],
+            "personen": self.cfg.dashboard_personen,
+            "taken": _overzicht_kort(overzicht),
+            "boodschappen": boodschappen,
+            "acties": acties,
+            "boodschappen_af": boodschappen_af,
+            "acties_af": acties_af,
+            "verjaardagen": self._traag["verjaardagen"],
+        }
+        if gen == self._gen:  # geen mutatie tijdens het bouwen → cachen mag
+            self._cache = vers
+            self._cache_ts = time.time()
+        return dict(vers)
 
     async def done(self, request: web.Request) -> web.Response:
         return await self._taak_actie(request, _todoist_afvinken)
@@ -336,7 +363,7 @@ class Dashboard:
             return web.json_response({"error": "geen taak-id"}, status=400)
         ok = await asyncio.to_thread(actie, task_id)
         if ok:
-            self._cache = None
+            self._invalidate()
         return web.json_response({"ok": ok}, status=200 if ok else 502)
 
     async def due(self, request: web.Request) -> web.Response:
@@ -354,7 +381,7 @@ class Dashboard:
             return web.json_response({"error": "id of datum ongeldig"}, status=400)
         ok = await asyncio.to_thread(_todoist_deadline, task_id, datum)
         if ok:
-            self._cache = None
+            self._invalidate()
         return web.json_response({"ok": ok}, status=200 if ok else 502)
 
     async def add(self, request: web.Request) -> web.Response:
@@ -370,7 +397,7 @@ class Dashboard:
             return web.json_response({"error": "lijst of tekst ontbreekt"}, status=400)
         ok = await asyncio.to_thread(_todoist_toevoegen, lijst, tekst)
         if ok:
-            self._cache = None
+            self._invalidate()
         return web.json_response({"ok": ok}, status=200 if ok else 502)
 
     async def message(self, request: web.Request) -> web.Response:
@@ -390,7 +417,7 @@ class Dashboard:
                 sender="het dashboard (muurtablet)", text=text, photo="(geen bijlage)",
             )
         reply = reply or "Hm, daar ging iets mis — probeer het nog eens?"
-        self._cache = None  # lijstjes kunnen net veranderd zijn
+        self._invalidate(ook_traag=True)  # het brein kan ook agenda/documenten hebben aangepast
         for adapter in self.adapters:
             if adapter is not self:
                 try:
