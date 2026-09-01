@@ -720,6 +720,19 @@ PAGE = """<!doctype html>
   #l2Inhoud li span { flex:1; min-width:0; }
   #l2Inhoud .notitie { color:var(--dim); font-style:italic; font-size:.88rem; }
   #l2Inhoud .afitem span { text-decoration:line-through; color:var(--dim); }
+  #taakvraag { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
+               align-items:center; justify-content:center; z-index:75; }
+  #tvKaart { background:var(--panel); border:1px solid var(--accent); border-radius:16px;
+             padding:1.1rem 1.3rem; width:min(500px,94vw); max-height:80vh; overflow-y:auto;
+             display:flex; flex-direction:column; gap:.6rem; }
+  #tvKaart h3 { font-size:1.05rem; }
+  #tvAntwoord { background:#262b31; border-radius:12px; padding:.7rem .9rem; font-size:.95rem;
+                line-height:1.5; white-space:pre-wrap; display:none; }
+  #tvInvoer { display:flex; gap:.45rem; }
+  #tvInvoer input { flex:1; background:var(--bg); border:1px solid #333a41; border-radius:10px;
+                    color:var(--ink); padding:.6rem .8rem; font-size:.95rem; }
+  #tvInvoer button { border:none; border-radius:10px; padding:0 .85rem; font-size:1.1rem;
+                     cursor:pointer; background:var(--accent); color:#14171a; }
   #detail { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
             align-items:center; justify-content:center; z-index:70; }
   #detailkaart { background:var(--panel); border:1px solid var(--lijn); border-radius:16px;
@@ -779,6 +792,18 @@ PAGE = """<!doctype html>
   <div id="l2kaart" onclick="event.stopPropagation()">
     <div id="l2kop"><h3 id="l2Titel"></h3><button onclick="sluitL2()" title="Sluiten">✕</button></div>
     <div id="l2Inhoud"></div>
+  </div>
+</div>
+<div id="taakvraag" onclick="sluitTaakVraag()">
+  <div id="tvKaart" onclick="event.stopPropagation()">
+    <h3 id="tvTitel"></h3>
+    <div id="tvNotitie" class="notitie"></div>
+    <div id="tvAntwoord"></div>
+    <div id="tvInvoer">
+      <input id="tvVeld" placeholder="Vraag Birdy iets over deze taak…" enterkeyhint="send">
+      <button class="micknop" onclick="spraak(this, tvStuur)" title="Spreek je vraag in">🎤</button>
+      <button onclick="tvStuur(document.getElementById('tvVeld').value)">→</button>
+    </div>
   </div>
 </div>
 <div id="detail" onclick="this.style.display='none'">
@@ -872,14 +897,40 @@ function taakRijL2(x){
     (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
       ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
 }
+let TV = null;  // open taak-dialoog: {lijst, id}
 function vraagOver(lijst, id){
   const x = (DATA[lijst] || []).find(t => t.id === id); if (!x) return;
-  sluitL2();
-  chatOpen(true);
-  const veld = document.getElementById('chatveld');
-  veld.value = `Over de ${lijst === 'acties' ? 'actie' : 'boodschap'} "${x.tekst}": `;
-  veld.focus();
-  try { veld.setSelectionRange(veld.value.length, veld.value.length); } catch(e){}
+  TV = { lijst, id };
+  document.getElementById('tvTitel').textContent = '💬 ' + x.tekst;
+  const n = document.getElementById('tvNotitie');
+  n.textContent = x.notitie || ''; n.style.display = x.notitie ? 'block' : 'none';
+  const a = document.getElementById('tvAntwoord');
+  a.textContent = ''; a.style.display = 'none';
+  document.getElementById('tvVeld').value = '';
+  document.getElementById('taakvraag').style.display = 'flex';
+  document.getElementById('tvVeld').focus();
+}
+function sluitTaakVraag(){ TV = null; document.getElementById('taakvraag').style.display = 'none'; }
+async function tvStuur(vraag){
+  vraag = (vraag || '').trim(); if (!vraag || !TV) return;
+  const x = (DATA[TV.lijst] || []).find(t => t.id === TV.id); if (!x) return;
+  document.getElementById('tvVeld').value = '';
+  const a = document.getElementById('tvAntwoord');
+  a.style.display = 'block'; a.textContent = '🐦 …denkt na…';
+  const soort = TV.lijst === 'acties' ? 'actie' : 'boodschap';
+  try {
+    const r = await fetch('/api/message', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ text: `Over de ${soort} "${x.tekst}": ${vraag}` }) });
+    const d = await r.json();
+    a.textContent = '🐦 ' + (d.reply || d.error || 'er ging iets mis');
+    await ververs();  // vernieuwde notitie ophalen (L2 eronder ververst mee)
+    if (TV){
+      const nx = (DATA[TV.lijst] || []).find(t => t.id === TV.id);
+      const n = document.getElementById('tvNotitie');
+      if (nx && nx.notitie){ n.textContent = nx.notitie; n.style.display = 'block'; }
+    }
+  } catch(e){ a.textContent = '🐦 Even niet bereikbaar — probeer het zo nog eens.'; }
 }
 function renderL2(){
   if (!L2open || !DATA) return;
@@ -1195,7 +1246,7 @@ async function stuur(tekst){
 }
 
 async function voegToe(ev, lijst, input){
-  if (ev.key !== 'Enter') return;
+  if (ev.key !== 'Enter' && ev.keyCode !== 13) return;
   const tekst = input.value.trim(); if (!tekst) return;
   input.value = ''; input.placeholder = '… toevoegen';
   try {
@@ -1266,9 +1317,9 @@ function toonMetKnop(t, knoptekst, actie){
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, luistert = false;
-function spraak(knop){
+function spraak(knop, cb){
   if (!SR) {
-    chatOpen(true); document.getElementById('chatveld').focus();
+    if (!cb) { chatOpen(true); document.getElementById('chatveld').focus(); }
     toon('🎤 Spraak werkt in Chrome of Safari — typen kan altijd.');
     return;
   }
@@ -1277,11 +1328,13 @@ function spraak(knop){
   rec.onstart = () => { luistert = true; knop.classList.add('luistert'); };
   rec.onend = () => { luistert = false; knop.classList.remove('luistert'); };
   rec.onerror = () => toon('🎤 Ik kon je niet verstaan — probeer nog eens.');
-  rec.onresult = ev => stuur(ev.results[0][0].transcript);
+  rec.onresult = ev => (cb || stuur)(ev.results[0][0].transcript);
   rec.start();
 }
 document.getElementById('invoer').addEventListener('keydown',
-  e => { if (e.key === 'Enter') stuur(e.target.value); });
+  e => { if (e.key === 'Enter' || e.keyCode === 13) stuur(e.target.value); });
 document.getElementById('chatveld').addEventListener('keydown',
-  e => { if (e.key === 'Enter') stuur(e.target.value); });
+  e => { if (e.key === 'Enter' || e.keyCode === 13) stuur(e.target.value); });
+document.getElementById('tvVeld').addEventListener('keydown',
+  e => { if (e.key === 'Enter' || e.keyCode === 13) tvStuur(e.target.value); });
 </script></body></html>"""
