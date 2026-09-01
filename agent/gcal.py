@@ -54,6 +54,7 @@ def _google_events(days: int) -> list[tuple[str, str]]:
         singleEvents=True,
         orderBy="startTime",
         maxResults=50,
+        timeZone=TZ,  # anders geeft de API UTC terug (vers account zonder tijdzone)
     ).execute()
     out = []
     for ev in result.get("items", []):

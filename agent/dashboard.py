@@ -42,13 +42,22 @@ def _agenda_rijk(days: int = 7) -> list[dict]:
                 timeMin=now.astimezone().isoformat(),
                 timeMax=(now + timedelta(days=days)).astimezone().isoformat(),
                 singleEvents=True, orderBy="startTime", maxResults=60,
+                timeZone="Europe/Amsterdam",  # anders komt alles in UTC (2 uur te vroeg)
             ).execute()
             for ev in resp.get("items", []):
                 s, e = ev.get("start", {}), ev.get("end", {})
+                wie = ev.get("creator", {}) or {}
+                org = ev.get("organizer", {}) or {}
+                naam = (org.get("displayName") or wie.get("displayName")
+                        or wie.get("email") or org.get("email") or "")
                 events.append({
                     "start": (s.get("dateTime") or s.get("date", ""))[:16],
                     "eind": (e.get("dateTime") or e.get("date", ""))[:16],
                     "titel": ev.get("summary", "(zonder titel)"),
+                    "omschrijving": (ev.get("description") or "")[:600],
+                    "locatie": ev.get("location", ""),
+                    "wie": naam.replace("bakkerbirdy@gmail.com", "Birdy"),
+                    "bron": "Gezinsagenda (Google)",
                 })
     except BaseException:  # SystemExit van de CLI-helpers telt ook
         pass
@@ -76,6 +85,10 @@ def _agenda_rijk(days: int = 7) -> list[dict]:
                     "start": iso(start),
                     "eind": iso(eind.dt if eind else None) or iso(start),
                     "titel": str(ev.get("SUMMARY", "(zonder titel)")),
+                    "omschrijving": str(ev.get("DESCRIPTION", ""))[:600],
+                    "locatie": str(ev.get("LOCATION", "")),
+                    "wie": "",
+                    "bron": "FamilyWall",
                 })
     except BaseException:
         pass
@@ -565,6 +578,17 @@ PAGE = """<!doctype html>
                       color:var(--ink); padding:.55rem .8rem; font-size:.95rem; }
   #chatinvoer button { border:none; border-radius:10px; padding:0 .85rem; font-size:1.1rem;
                        cursor:pointer; background:var(--accent); color:#14171a; }
+  #detail { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
+            align-items:center; justify-content:center; z-index:70; }
+  #detailkaart { background:var(--panel); border:1px solid var(--lijn); border-radius:16px;
+                 padding:1.2rem 1.4rem; max-width:min(460px,90vw); max-height:80vh;
+                 overflow-y:auto; }
+  #detailkaart h3 { margin-bottom:.6rem; font-size:1.15rem; }
+  #dRegels div { padding:.18rem 0; font-size:.95rem; color:var(--dim); }
+  #dRegels .omschr { color:var(--ink); white-space:pre-wrap; margin-top:.5rem;
+                     border-top:1px solid var(--lijn); padding-top:.6rem; line-height:1.5; }
+  #detailkaart button { margin-top:.9rem; border:none; border-radius:10px; padding:.45rem 1.1rem;
+                        background:var(--accent); color:#14171a; cursor:pointer; font-size:.95rem; }
   #sleutel { display:none; padding:2rem; text-align:center; }
   #sleutel input { font-size:1.05rem; padding:.6rem; border-radius:8px; border:1px solid #444; }
 </style></head><body>
@@ -609,6 +633,13 @@ PAGE = """<!doctype html>
   </div>
 </div>
 <div id="melding"></div>
+<div id="detail" onclick="this.style.display='none'">
+  <div id="detailkaart" onclick="event.stopPropagation()">
+    <h3 id="dTitel"></h3>
+    <div id="dRegels"></div>
+    <button onclick="document.getElementById('detail').style.display='none'">Sluiten</button>
+  </div>
+</div>
 <button id="chatfab" title="Chat met Birdy" onclick="chatOpen(true)">
   <img src="/logo-bird.png" alt="" onerror="this.replaceWith('💬')"></button>
 <div id="chat">
@@ -671,7 +702,7 @@ function dueBadge(d){
 
 // ── weekweergave ──────────────────────────────────────────────────────────
 const KLEUREN = ['#7fbfa6', '#d9a44e', '#e07a6a', '#8ab4d8', '#b39ddb', '#f2a1c2'];
-let PERSONEN = [];
+let PERSONEN = [], WEEK = [];
 function persoonMatch(tekst){
   const t = tekst.toLowerCase();
   for (let i = 0; i < PERSONEN.length; i++)
@@ -706,7 +737,8 @@ function bouwWeek(events){
     const key = d.toLocaleDateString('sv-SE');
     volgorde.push(key); dagen[key] = { datum:d, heledag:[], tijd:[] };
   }
-  events.forEach(e => {
+  events.forEach((e, i) => {
+    e._i = i;
     const d = e.start.slice(0,10); if (!(d in dagen)) return;
     (e.start.length <= 10 ? dagen[d].heledag : dagen[d].tijd).push(e);
   });
@@ -723,7 +755,7 @@ function bouwWeek(events){
     html += `<div class="heledag">` + g.heledag.map(e => {
       const k = kleurVoor(e.titel);
       return `<div class="chip" style="border-color:${k};background:${k}22"` +
-        ` onclick="detail('${esc(e.titel).replace(/'/g,'&#39;')}','hele dag')">${esc(e.titel)}</div>`;
+        ` onclick="detailEv(${e._i})">${esc(e.titel)}</div>`;
     }).join('') + `</div>`;
   });
   let uuras = '<div class="uuras">';
@@ -732,31 +764,61 @@ function bouwWeek(events){
   html += uuras + '</div>';
   volgorde.forEach(key => {
     const g = dagen[key];
-    const t = g.tijd.map(e => ({ ...e, s: minuten(e.start),
+    const t = g.tijd.map(e => ({ ev: e, s: minuten(e.start),
       e: (e.eind && e.eind.length > 10) ? Math.max(minuten(e.eind), minuten(e.start) + 30)
                                         : minuten(e.start) + 60 }));
-    t.sort((a,b) => a.s - b.s);
-    for (let a = 0; a < t.length; a++) for (let b = a+1; b < t.length; b++)
-      if (t[b].s < t[a].e) { t[a].conflict = t[b].conflict = true; t[b].schuif = true; }
+    t.sort((a,b) => a.s - b.s || b.e - a.e);
+    // kolomtoewijzing zoals een echte kalender: overlappers netjes naast elkaar
+    const actief = [];
+    t.forEach(x => {
+      for (let i = actief.length - 1; i >= 0; i--) if (actief[i].e <= x.s) actief.splice(i, 1);
+      const bezet = new Set(actief.map(a => a.col));
+      x.col = 0; while (bezet.has(x.col)) x.col++;
+      actief.push(x);
+    });
+    let ci = 0;  // clusters van aaneengesloten overlap → gedeelde kolombreedte
+    while (ci < t.length){
+      let cj = ci, eind = t[ci].e;
+      while (cj + 1 < t.length && t[cj + 1].s < eind){ cj++; eind = Math.max(eind, t[cj].e); }
+      const groep = t.slice(ci, cj + 1);
+      const cols = Math.max(...groep.map(y => y.col)) + 1;
+      groep.forEach(y => { y.cols = cols; });
+      ci = cj + 1;
+    }
     let vak = '<div class="tijdvak">';
     for (let u = U0; u <= U1; u += 2) vak += `<div class="uurlijn" style="top:${(u-U0)*PPU}px"></div>`;
-    t.forEach(e => {
-      const top = Math.max(0, (e.s/60 - U0) * PPU);
-      const hoogte = Math.max(24, Math.min(HOOG - top - 2, (e.e - e.s) / 60 * PPU - 2));
-      const k = kleurVoor(e.titel);
-      const tijd = e.start.slice(11,16) +
-        ((e.eind && e.eind.length > 10) ? '–' + e.eind.slice(11,16) : '');
-      vak += `<div class="blok${e.conflict ? ' conflict' : ''}"` +
+    t.forEach(x => {
+      const top = Math.max(0, (x.s/60 - U0) * PPU);
+      const hoogte = Math.max(24, Math.min(HOOG - top - 2, (x.e - x.s) / 60 * PPU - 2));
+      const k = kleurVoor(x.ev.titel);
+      const breedte = 100 / x.cols;
+      const tijd = x.ev.start.slice(11,16) +
+        ((x.ev.eind && x.ev.eind.length > 10) ? '–' + x.ev.eind.slice(11,16) : '');
+      vak += `<div class="blok${x.cols > 1 ? ' conflict' : ''}"` +
         ` style="top:${top}px;height:${hoogte}px;border-color:${k};background:${k}26;` +
-        `${e.schuif ? 'left:34%;' : (e.conflict ? 'right:34%;' : '')}color:var(--ink)"` +
-        ` onclick="detail('${esc(e.titel).replace(/'/g,'&#39;')}','${tijd}${e.conflict ? ' · ⚠ overlapt' : ''}')">` +
-        `<b>${esc(e.titel)}</b><small>${tijd}</small></div>`;
+        `left:calc(${x.col * breedte}% + 3px);width:calc(${breedte}% - 6px);color:var(--ink)"` +
+        ` onclick="detailEv(${x.ev._i})">` +
+        `<b>${esc(x.ev.titel)}</b><small>${tijd}</small></div>`;
     });
     html += vak + '</div>';
   });
   return html;
 }
-function detail(titel, sub){ toon(`📅 ${titel} — ${sub}`); }
+function detailEv(i){
+  const e = WEEK[i]; if (!e) return;
+  document.getElementById('dTitel').textContent = e.titel;
+  const tijd = e.start.length > 10
+    ? `${dagLabel(e.start.slice(0,10))} · ${e.start.slice(11,16)}` +
+      ((e.eind && e.eind.length > 10) ? '–' + e.eind.slice(11,16) : '')
+    : `${dagLabel(e.start.slice(0,10))} · hele dag`;
+  let rows = `<div>🕐 ${esc(tijd)}</div>`;
+  if (e.locatie) rows += `<div>📍 ${esc(e.locatie)}</div>`;
+  if (e.wie) rows += `<div>👤 ${esc(e.wie)}</div>`;
+  if (e.bron) rows += `<div>🔗 ${esc(e.bron)}</div>`;
+  if (e.omschrijving) rows += `<div class="omschr">${esc(e.omschrijving)}</div>`;
+  document.getElementById('dRegels').innerHTML = rows;
+  document.getElementById('detail').style.display = 'flex';
+}
 
 async function ververs(){
   try {
@@ -767,8 +829,9 @@ async function ververs(){
     document.getElementById('app').style.display = 'block';
     document.getElementById('klok').textContent = d.nu;
     PERSONEN = d.personen || [];
+    WEEK = d.week || [];
     document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
-    renderWeek(d.week || []);
+    renderWeek(WEEK);
     const t = d.taken || {urgent:[],week:[],rest:''};
     const rows = t.urgent.map(x => `<li class="urgent"><span>${esc(x)}${persChip(x)}</span></li>`)
       .concat(t.week.map(x => `<li class="week"><span>${esc(x)}${persChip(x)}</span></li>`));
