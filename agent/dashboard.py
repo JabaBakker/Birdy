@@ -728,6 +728,49 @@ PAGE = """<!doctype html>
               cursor:pointer; }
   .pl-reset { margin-top:1rem; background:none; border:none; color:var(--dim);
               font-size:.85rem; cursor:pointer; text-decoration:underline; }
+  .pl-versie { display:flex; gap:.3rem; background:var(--panel); border-radius:99px; padding:.22rem; }
+  .pl-versie button { border:none; background:none; color:var(--dim); font-size:.9rem;
+                      padding:.35rem .8rem; border-radius:99px; cursor:pointer; }
+  .pl-versie button.actief { background:var(--accent); color:#14171a; font-weight:700; }
+  .pl-opzet { display:grid; grid-template-columns:1fr 1fr; gap:1rem; align-items:start; }
+  .pl-kolomkop { font-size:.78rem; letter-spacing:.08em; text-transform:uppercase;
+                 color:var(--dim); margin-bottom:.5rem; }
+  .pl-slots, .pl-bak { list-style:none; padding:0; display:flex; flex-direction:column; gap:.5rem; }
+  .pl-slot { border:2px dashed #3a4148; border-radius:16px; min-height:3.9rem; display:flex;
+             align-items:center; justify-content:center; color:var(--dim); font-size:.9rem; }
+  .pl-slot.vol { border:none; min-height:0; display:block; }
+  .pl-slot .pl-kaart { border-color:var(--accent); }
+  .pl-kaart.mini { padding:.75rem .85rem; font-size:1.05rem; gap:.7rem; }
+  .pl-kaart.mini .em { font-size:1.6rem; }
+  .pl-tijd-rij { display:flex; gap:.7rem; align-items:center; margin-top:1.1rem;
+                 color:var(--dim); font-size:1rem; }
+  .pl-tijd-rij input { background:var(--panel); border:1px solid #333a41; color:var(--ink);
+                       border-radius:10px; padding:.5rem .7rem; font-size:1.15rem; }
+  .pl-balkwrap { position:relative; margin:1.6rem 0 .8rem; }
+  .pl-balk2 { display:flex; height:92px; border-radius:14px; overflow:hidden;
+              border:1px solid var(--lijn); background:var(--panel); }
+  .pl-seg { display:flex; flex-direction:column; align-items:center; justify-content:center;
+            gap:.05rem; font-size:.72rem; border-right:2px solid var(--bg); cursor:pointer;
+            min-width:2.2rem; position:relative; transition:width 1s linear; overflow:hidden;
+            white-space:nowrap; }
+  .pl-seg .em2 { font-size:1.5rem; }
+  .pl-seg.af2 { opacity:.5; cursor:default; }
+  .pl-seg.af2::after { content:"✓"; position:absolute; top:.15rem; right:.3rem;
+                       color:var(--accent); font-weight:700; }
+  .pl-seg.nu2 { box-shadow:inset 0 0 0 3px var(--amber); }
+  .pl-seg.bonus { background:rgba(127,191,166,.22) !important; cursor:default; }
+  .pl-cursor { position:absolute; top:-9px; bottom:-9px; width:3px; background:var(--rood);
+               border-radius:2px; transition:left 1s linear; }
+  .pl-cursor::before { content:"▼"; position:absolute; top:-1.05rem; left:-.42rem;
+                       color:var(--rood); font-size:.8rem; }
+  .pl-bonuskaart { margin-top:.9rem; background:rgba(127,191,166,.1); border:2px solid var(--accent);
+                   border-radius:16px; padding:1rem 1.1rem; display:flex; align-items:center;
+                   gap:.9rem; font-size:1.15rem; position:relative; overflow:hidden; }
+  .pl-bonuskaart .em { font-size:2rem; }
+  .pl-bonuskaart b { margin-left:auto; color:var(--accent); font-size:1.35rem; white-space:nowrap; }
+  .pl-bonuskaart .balk { position:absolute; left:0; bottom:0; height:6px; background:var(--accent);
+                         transition:width 1s linear; }
+  @media (max-width:560px){ .pl-opzet { gap:.5rem; } .pl-kaart.mini { font-size:.95rem; } }
   #plCanvas { position:fixed; inset:0; pointer-events:none; z-index:90; }
   #plKlaar { position:fixed; inset:0; background:rgba(20,23,26,.88); display:none;
              align-items:center; justify-content:center; flex-direction:column; gap:1rem;
@@ -1261,13 +1304,14 @@ function toonSleutel(){ document.getElementById('app').style.display='none';
 try { kiesTab(localStorage.getItem('birdy-tab') || 'vandaag'); } catch(e){ kiesTab('vandaag'); }
 ververs(); setInterval(ververs, 60000);
 
-// ── planning: kinderroutine met sleepvolgorde, tijdbalken en feest ────────
+// ── planning: kinderroutine met slots, twee weergaven en bonus ────────────
 const ROUTINES = {
   ochtend: [
     { e:'🚽', n:'Naar de wc', m:3 },
     { e:'👕', n:'Aankleden', m:5 },
     { e:'🥣', n:'Ontbijten', m:15 },
     { e:'🪥', n:'Tandenpoetsen', m:3 },
+    { e:'🧺', n:'Haren en wassen', m:4 },
     { e:'🎒', n:'Tas en schoenen', m:4 },
   ],
   avond: [
@@ -1275,122 +1319,235 @@ const ROUTINES = {
     { e:'🛁', n:'Wassen', m:10 },
     { e:'🩳', n:'Pyjama aan', m:3 },
     { e:'🪥', n:'Tandenpoetsen', m:3 },
-    { e:'📖', n:'Boekje lezen', m:10 },
+    { e:'🚽', n:'Nog even plassen', m:2 },
   ],
 };
+const BONUS = { e:'🎬', n:'Filmpje of boekje', basis: 5 };
 function plVandaag(){ return new Date().toLocaleDateString('sv-SE'); }
 function plLeeg(dagdeel){
-  return { datum: plVandaag(), dagdeel,
-           volgorde: ROUTINES[dagdeel].map((_, i) => i), start: 0, af: [] };
+  let versie = 'kaart';
+  try { versie = localStorage.getItem('birdy-plan-versie') || 'kaart'; } catch(e){}
+  return { datum: plVandaag(), dagdeel, versie, gekozen: [], start: 0, af: [],
+           vertrek: dagdeel === 'ochtend' ? '08:00' : '19:30' };
 }
 function plLaad(){
   let s = null;
   try { s = JSON.parse(localStorage.getItem('birdy-plan')); } catch(e){}
-  if (!s || s.datum !== plVandaag())
+  if (!s || s.datum !== plVandaag() || !Array.isArray(s.gekozen))
     s = plLeeg(new Date().getHours() < 14 ? 'ochtend' : 'avond');
   return s;
 }
 let PLAN = plLaad();
 function plBewaar(){ try { localStorage.setItem('birdy-plan', JSON.stringify(PLAN)); } catch(e){} }
-function plDagdeel(d){ PLAN = plLeeg(d); plBewaar(); renderPlan(); }
+function plDagdeel(d){ PLAN = plLeeg(d); PLAN.dagdeel = d;
+  PLAN.vertrek = d === 'ochtend' ? '08:00' : '19:30'; plBewaar(); renderPlan(); }
+function plVersie(v){ PLAN.versie = v;
+  try { localStorage.setItem('birdy-plan-versie', v); } catch(e){}
+  plBewaar(); renderPlan(); }
 function plReset(){ PLAN = plLeeg(PLAN.dagdeel); plBewaar(); renderPlan(); }
-function plStart(){ PLAN.start = Date.now(); plBewaar(); renderPlan(); deuntje(); }
-
+function plStart(){
+  if (!PLAN.gekozen.length) { toon('Sleep eerst wat kaartjes naar links!'); return; }
+  const t = document.getElementById('plVertrek');
+  if (t && t.value) PLAN.vertrek = t.value;
+  PLAN.start = Date.now(); PLAN.af = []; plBewaar(); renderPlan(); deuntje();
+}
+function plKaartHtml(t, extra){
+  return `<span class="em">${t.e}</span><span class="naam">${t.n}</span>` +
+         `<span class="tijd">${t.m} min</span>` + (extra || '');
+}
 function renderPlan(){
   const el = document.getElementById('paneelPlan');
   const r = ROUTINES[PLAN.dagdeel];
   const kop = `<div class="pl-kop"><h2>${PLAN.dagdeel === 'ochtend' ? '🌞 Goedemorgen!' : '🌙 Avondprogramma'}</h2>
+    <div class="pl-versie">
+      <button class="${PLAN.versie==='kaart'?'actief':''}" onclick="plVersie('kaart')">Kaartjes</button>
+      <button class="${PLAN.versie==='balk'?'actief':''}" onclick="plVersie('balk')">Tijdlijn</button>
+    </div>
     <div class="pl-dagdeel">
       <button class="${PLAN.dagdeel==='ochtend'?'actief':''}" onclick="plDagdeel('ochtend')">Ochtend</button>
       <button class="${PLAN.dagdeel==='avond'?'actief':''}" onclick="plDagdeel('avond')">Avond</button>
     </div></div>`;
-  if (!PLAN.start){
-    el.innerHTML = kop +
-      `<p class="pl-hint">Sleep de kaartjes in jouw volgorde — wat doe je eerst?</p>` +
-      `<ul class="pl-lijst" id="plLijst">` + PLAN.volgorde.map(i => {
-        const t = r[i];
-        return `<li class="pl-kaart sleepbaar" data-i="${i}"
-          onpointerdown="plDown(event)" onpointermove="plMove(event)"
-          onpointerup="plUp(event)" onpointercancel="plUp(event)">
-          <span class="em">${t.e}</span><span class="naam">${t.n}</span>
-          <span class="tijd">${t.m} min</span></li>`;
-      }).join('') + `</ul>` +
-      `<button class="pl-start" onclick="plStart()">Start! ▶</button>`;
-  } else {
-    el.innerHTML = kop +
-      `<ul class="pl-lijst">` + PLAN.volgorde.map(i => {
-        const t = r[i];
-        const af = PLAN.af.includes(i);
-        return `<li class="pl-kaart${af ? ' af' : ''}" data-i="${i}" onclick="plVier(event, ${i})">
-          <span class="em">${t.e}</span><span class="naam">${t.n}</span>
-          <span class="tijd">${t.m} min</span>
-          <button class="pl-vink">${af ? '✓' : ''}</button>
-          <div class="balk"></div></li>`;
-      }).join('') + `</ul>` +
-      `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
-    plTick();
-  }
+  if (!PLAN.start){ renderOpzet(el, r, kop); return; }
+  if (PLAN.versie === 'balk') renderBalk(el, r, kop); else renderKaarten(el, r, kop);
+  plTick();
 }
-// slepen (kaartjes hebben gelijke hoogte; DOM-nodes verplaatsen behoudt de pointer-capture)
-let plSleepData = null;
-function plDown(ev){
+// ── opzet: placeholders links, voorraad rechts ──
+function renderOpzet(el, r, kop){
+  const slots = PLAN.gekozen.map((i, s) =>
+    `<li class="pl-slot vol" data-s="${s}"><div class="pl-kaart mini" onclick="plWeg(${s})"
+      title="tik om terug te leggen">${plKaartHtml(r[i])}</div></li>`)
+    .concat(PLAN.gekozen.length < r.length
+      ? [`<li class="pl-slot" data-s="${PLAN.gekozen.length}">${PLAN.gekozen.length + 1}e taak hier</li>`] : []);
+  const bak = r.map((t, i) => PLAN.gekozen.includes(i) ? '' :
+    `<li class="pl-kaart mini sleepbaar" data-i="${i}"
+       onpointerdown="plPak(event,${i})" onpointermove="plSleepMove(event)"
+       onpointerup="plLos(event)" onpointercancel="plLos(event)">${plKaartHtml(t)}</li>`).join('');
+  el.innerHTML = kop +
+    `<p class="pl-hint">Sleep de taken die je gaat doen naar links, in jouw volgorde.
+      Wat je niet hoeft, laat je gewoon staan!</p>` +
+    `<div class="pl-opzet">
+      <div><div class="pl-kolomkop">📋 Mijn plan</div><ul class="pl-slots" id="plSlots">${slots.join('')}</ul></div>
+      <div><div class="pl-kolomkop">🧺 Taken</div><ul class="pl-bak">${bak}</ul></div>
+    </div>` +
+    `<div class="pl-tijd-rij"><span>${PLAN.dagdeel === 'ochtend' ? '🕗 We vertrekken om' : '🕢 Bedtijd om'}</span>
+      <input type="time" id="plVertrek" value="${PLAN.vertrek}">
+      <span>· daarna: ${BONUS.e} ${BONUS.n.toLowerCase()} (${BONUS.basis} min + bonus!)</span></div>` +
+    `<button class="pl-start" onclick="plStart()">Start! ▶</button>` +
+    (PLAN.gekozen.length ? `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>` : '');
+}
+function plWeg(s){ PLAN.gekozen.splice(s, 1); plBewaar(); renderPlan(); }
+let plPakData = null;
+function plPak(ev, i){
   const li = ev.currentTarget;
-  plSleepData = { li, y0: ev.clientY, h: li.offsetHeight + 9 };
+  plPakData = { li, i, x0: ev.clientX, y0: ev.clientY, bezig: false };
   try { li.setPointerCapture(ev.pointerId); } catch(e){}
-  li.classList.add('tilt');
-  // vangnet: loslaten buiten het kaartje (of verloren capture) altijd afronden
-  window.addEventListener('pointerup', plUp, { once: true });
-  window.addEventListener('pointercancel', plUp, { once: true });
+  window.addEventListener('pointerup', plLos, { once: true });
+  window.addEventListener('pointercancel', plLos, { once: true });
 }
-function plMove(ev){
-  if (!plSleepData) return;
-  const s = plSleepData, dy = ev.clientY - s.y0;
-  s.li.style.transform = `translateY(${dy}px)`;
-  if (dy > s.h * 0.55 && s.li.nextElementSibling){
-    s.li.parentNode.insertBefore(s.li, s.li.nextElementSibling.nextElementSibling);
-    s.y0 += s.h; s.li.style.transform = `translateY(${ev.clientY - s.y0}px)`;
-  } else if (dy < -s.h * 0.55 && s.li.previousElementSibling){
-    s.li.parentNode.insertBefore(s.li, s.li.previousElementSibling);
-    s.y0 -= s.h; s.li.style.transform = `translateY(${ev.clientY - s.y0}px)`;
+function plSleepMove(ev){
+  if (!plPakData) return;
+  const s = plPakData, dx = ev.clientX - s.x0, dy = ev.clientY - s.y0;
+  if (!s.bezig && Math.abs(dx) + Math.abs(dy) > 8){ s.bezig = true; s.li.classList.add('tilt'); }
+  if (s.bezig){ s.li.style.transform = `translate(${dx}px, ${dy}px)`;
+    s.li.style.zIndex = 20; s.px = ev.clientX; s.py = ev.clientY; }
+}
+function plLos(ev){
+  if (!plPakData) return;
+  const s = plPakData; plPakData = null;
+  s.li.style.transform = ''; s.li.style.zIndex = ''; s.li.classList.remove('tilt');
+  if (!s.bezig){  // gewoon tikken = in het volgende vrije vakje
+    PLAN.gekozen.push(s.i); plBewaar(); renderPlan(); return;
+  }
+  s.li.style.visibility = 'hidden';
+  const doel = document.elementFromPoint(s.px || 0, s.py || 0);
+  s.li.style.visibility = '';
+  const slot = doel && doel.closest ? doel.closest('.pl-slot') : null;
+  if (slot){
+    const plek = Math.min(parseInt(slot.dataset.s, 10), PLAN.gekozen.length);
+    PLAN.gekozen.splice(plek, 0, s.i);
+    plBewaar(); renderPlan();
   }
 }
-function plUp(ev){
-  if (!plSleepData) return;
-  const s = plSleepData; plSleepData = null;
-  s.li.style.transform = ''; s.li.classList.remove('tilt');
-  PLAN.volgorde = [...document.querySelectorAll('#plLijst .pl-kaart')]
-    .map(k => parseInt(k.dataset.i, 10));
-  plBewaar();
+// ── bonusberekening (gedeeld): sneller = meer, langzamer = minder ──
+function bonusMinuten(){
+  const r = ROUTINES[PLAN.dagdeel];
+  const klaarPlanned = PLAN.af.reduce((som, a) => som + r[a.i].m, 0);
+  const alles = PLAN.af.length === PLAN.gekozen.length;
+  const eind = alles && PLAN.af.length
+    ? (PLAN.af[PLAN.af.length - 1].t - PLAN.start) / 60000
+    : (Date.now() - PLAN.start) / 60000;
+  return Math.max(0, Math.round(BONUS.basis + klaarPlanned - eind));
+}
+// ── weergave 1: kaartjes ──
+function renderKaarten(el, r, kop){
+  el.innerHTML = kop +
+    `<ul class="pl-lijst">` + PLAN.gekozen.map(i => {
+      const t = r[i], af = PLAN.af.some(a => a.i === i);
+      return `<li class="pl-kaart${af ? ' af' : ''}" data-i="${i}" onclick="plVier(event, ${i})">
+        ${plKaartHtml(t, `<button class="pl-vink">${af ? '✓' : ''}</button><div class="balk"></div>`)}</li>`;
+    }).join('') + `</ul>` +
+    `<div class="pl-bonuskaart"><span class="em">${BONUS.e}</span>
+      <span class="naam">${BONUS.n}</span><b id="plBonus"></b><div class="balk" id="plBonusBalk"></div></div>` +
+    `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
+}
+// ── weergave 2: tijdlijn met vertrektijd ──
+function hmNaarMin(hm){ const d = hm.split(':'); return (+d[0]) * 60 + (+d[1]); }
+function balkModel(){
+  const r = ROUTINES[PLAN.dagdeel];
+  const startD = new Date(PLAN.start);
+  const startMin = startD.getHours() * 60 + startD.getMinutes() + startD.getSeconds() / 60;
+  const somPlanned = PLAN.gekozen.reduce((s, i) => s + r[i].m, 0);
+  let totaal = hmNaarMin(PLAN.vertrek) - startMin;
+  if (totaal < somPlanned + 2) totaal = somPlanned + BONUS.basis;
+  const nu = (Date.now() - PLAN.start) / 60000;
+  const segs = []; let vorige = 0;
+  PLAN.gekozen.forEach(i => {
+    const afRec = PLAN.af.find(a => a.i === i);
+    const eerstePending = !afRec && !segs.some(s => !s.af && !s.bonus);
+    let breed;
+    if (afRec){ breed = Math.max(.7, (afRec.t - PLAN.start) / 60000 - vorige); }
+    else if (eerstePending){ breed = Math.max(r[i].m, nu - vorige); }
+    else { breed = r[i].m; }
+    segs.push({ i, af: !!afRec, actief: eerstePending, breed });
+    vorige += breed;
+  });
+  const bonus = Math.max(0, totaal - vorige);
+  segs.push({ bonus: true, breed: Math.max(bonus, 0.01) });
+  return { segs, totaal: Math.max(totaal, vorige + 0.01), nu, bonusMin: Math.round(bonus) };
+}
+function renderBalk(el, r, kop){
+  const m = balkModel();
+  el.innerHTML = kop +
+    `<p class="pl-hint">De rode pijl is de klok — blijf hem voor! Alles wat je overhoudt is
+      ${BONUS.e} bonustijd. Klaar met een taak? Tik erop!</p>` +
+    `<div class="pl-balkwrap"><div class="pl-balk2" id="plBalk2">` +
+    m.segs.map((s, k) => s.bonus
+      ? `<div class="pl-seg bonus" id="plSegBonus"><span class="em2">${BONUS.e}</span><span id="plBonus"></span></div>`
+      : `<div class="pl-seg${s.af ? ' af2' : ''}${s.actief ? ' nu2' : ''}" data-i="${s.i}"
+           style="background:${KLEUREN[s.i % KLEUREN.length]}30"
+           onclick="plVier(event, ${s.i})">
+           <span class="em2">${r[s.i].e}</span><span>${r[s.i].n.split(' ')[0]}</span>
+           <span>${r[s.i].m}m</span></div>`).join('') +
+    `</div><div class="pl-cursor" id="plCursor"></div></div>` +
+    `<div class="pl-tijd-rij"><span>🏁 ${PLAN.dagdeel === 'ochtend' ? 'Vertrek' : 'Bedtijd'}: ${PLAN.vertrek}</span></div>` +
+    `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
 }
 function plTick(){
   if (!PLAN.start || document.getElementById('paneelPlan').style.display === 'none') return;
   const r = ROUTINES[PLAN.dagdeel];
-  const sec = (Date.now() - PLAN.start) / 1000;
-  let cum = 0, nuIdx = -1;
-  PLAN.volgorde.forEach(i => {
-    const kaart = document.querySelector(`#paneelPlan .pl-kaart[data-i="${i}"]`);
-    if (!kaart) return;
-    const dur = r[i].m * 60;
-    const frac = Math.max(0, Math.min(1, (sec - cum) / dur));
-    const balk = kaart.querySelector('.balk');
-    if (balk && !PLAN.af.includes(i)) balk.style.width = (frac * 100) + '%';
-    if (nuIdx === -1 && sec < cum + dur) nuIdx = i;
-    kaart.classList.toggle('nu', i === nuIdx && !PLAN.af.includes(i));
-    cum += dur;
-  });
+  const bonus = bonusMinuten();
+  const bonusEl = document.getElementById('plBonus');
+  if (PLAN.versie === 'balk'){
+    const m = balkModel();
+    m.segs.forEach(s => {
+      const el = s.bonus ? document.getElementById('plSegBonus')
+        : document.querySelector(`.pl-seg[data-i="${s.i}"]`);
+      if (el) el.style.width = (s.breed / m.totaal * 100) + '%';
+      if (el && !s.bonus){ el.classList.toggle('nu2', !!s.actief); }
+    });
+    const cursor = document.getElementById('plCursor');
+    if (cursor) cursor.style.left = Math.min(99.5, m.nu / m.totaal * 100) + '%';
+    if (bonusEl) bonusEl.textContent = m.bonusMin + ' min';
+  } else {
+    const sec = (Date.now() - PLAN.start) / 1000;
+    let cum = 0, nuGezet = false;
+    PLAN.gekozen.forEach(i => {
+      const kaart = document.querySelector(`#paneelPlan .pl-kaart[data-i="${i}"]`);
+      const af = PLAN.af.some(a => a.i === i);
+      const dur = r[i].m * 60;
+      if (kaart){
+        const balk = kaart.querySelector('.balk');
+        if (balk && !af) balk.style.width = (Math.max(0, Math.min(1, (sec - cum) / dur)) * 100) + '%';
+        const isNu = !nuGezet && sec < cum + dur && !af;
+        kaart.classList.toggle('nu', isNu);
+        if (isNu) nuGezet = true;
+      }
+      cum += dur;
+    });
+    if (bonusEl) bonusEl.textContent = bonus + ' min';
+    const bb = document.getElementById('plBonusBalk');
+    if (bb) bb.style.width = Math.min(100, bonus / (BONUS.basis * 3) * 100) + '%';
+  }
 }
 setInterval(plTick, 1000);
 function plVier(ev, i){
-  if (PLAN.af.includes(i)) return;
-  PLAN.af.push(i); plBewaar();
-  const kaart = ev.currentTarget.getBoundingClientRect();
-  confetti(kaart.left + kaart.width / 2, kaart.top + kaart.height / 2, 60);
+  if (PLAN.af.some(a => a.i === i)) return;
+  if (PLAN.versie === 'balk'){  // op de tijdlijn: alleen de actieve taak (volgorde!)
+    const eerste = PLAN.gekozen.find(g => !PLAN.af.some(a => a.i === g));
+    if (i !== eerste) return;
+  }
+  PLAN.af.push({ i, t: Date.now() }); plBewaar();
+  const rect = ev.currentTarget.getBoundingClientRect();
+  confetti(rect.left + rect.width / 2, rect.top + rect.height / 2, 60);
   renderPlan();
-  if (PLAN.af.length === ROUTINES[PLAN.dagdeel].length){
-    document.getElementById('plKlaar').style.display = 'flex';
+  if (PLAN.af.length === PLAN.gekozen.length){
+    const einde = document.getElementById('plKlaar');
+    einde.querySelector('p').textContent =
+      `Alles is af — je hebt ${bonusMinuten()} minuten ${BONUS.n.toLowerCase()} verdiend!`;
+    einde.style.display = 'flex';
     confetti(innerWidth / 2, innerHeight / 3, 220);
     fanfare();
-    setTimeout(() => { document.getElementById('plKlaar').style.display = 'none'; }, 6000);
+    setTimeout(() => { einde.style.display = 'none'; }, 7000);
   } else { deuntje(); }
 }
 // confetti + geluid (zelfvoorzienend, geen externe bestanden)
@@ -1398,10 +1555,9 @@ function confetti(x, y, n){
   const c = document.getElementById('plCanvas');
   c.width = innerWidth; c.height = innerHeight;
   const ctx = c.getContext('2d');
-  const kleuren = ['#7fbfa6', '#d9a44e', '#e07a6a', '#8ab4d8', '#b39ddb', '#f2a1c2'];
   const p = Array.from({ length: n }, () => ({
     x, y, vx: (Math.random() - .5) * 14, vy: -Math.random() * 12 - 3,
-    r: Math.random() * 5 + 3, k: kleuren[Math.floor(Math.random() * kleuren.length)],
+    r: Math.random() * 5 + 3, k: KLEUREN[Math.floor(Math.random() * KLEUREN.length)],
     a: Math.random() * Math.PI }));
   const t0 = performance.now();
   (function stap(t){
