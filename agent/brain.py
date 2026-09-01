@@ -82,9 +82,14 @@ class Brain:
                     if cost >= self.cfg.cycle_budget_usd:
                         log.warning("cyclusbudget bereikt ($%.2f) — stop", cost)
                         break
-        except Exception:
+        except Exception as e:
             log.exception("cyclus '%s' mislukt", label)
-            reply = None
+            if "credit balance" in str(e).lower():
+                reply = ("😴 Mijn denk-tegoed is op — vul de Anthropic-credits aan via "
+                         "console.anthropic.com (Billing), dan doe ik meteen weer mee. "
+                         "Afvinken en de lijstjes op het dashboard werken gewoon door.")
+            else:
+                reply = None
         finally:
             self.ledger.record(cost)
             commit(self.cfg.workspace, f"{label} — {datetime.now():%d-%m %H:%M} (${cost:.2f})")
