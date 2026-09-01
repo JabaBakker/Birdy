@@ -205,15 +205,16 @@ def _todoist_deadline(task_id: str, datum: str) -> bool:
         return False
 
 
-def _todoist_toevoegen(lijst: str, tekst: str) -> bool:
+def _todoist_toevoegen(lijst: str, tekst: str) -> dict | None:
     from . import todoist
 
     try:
         project = todoist._project(lijst)
-        todoist._request("POST", "/tasks", json={"content": tekst, "project_id": project["id"]})
-        return True
+        t = todoist._request("POST", "/tasks", json={"content": tekst, "project_id": project["id"]})
+        return {"id": str(t["id"]), "tekst": t["content"],
+                "due": ((t.get("due") or {}).get("date") or "")[:10]}
     except BaseException:
-        return False
+        return None
 
 
 def _verjaardagen() -> list[dict]:
@@ -359,12 +360,12 @@ class Dashboard:
         return dict(vers)
 
     async def done(self, request: web.Request) -> web.Response:
-        return await self._taak_actie(request, _todoist_afvinken)
+        return await self._taak_actie(request, _todoist_afvinken, self._patch_afgevinkt)
 
     async def reopen(self, request: web.Request) -> web.Response:
-        return await self._taak_actie(request, _todoist_heropen)
+        return await self._taak_actie(request, _todoist_heropen, self._patch_heropend)
 
-    async def _taak_actie(self, request: web.Request, actie) -> web.Response:
+    async def _taak_actie(self, request: web.Request, actie, patch) -> web.Response:
         if not self._authorized(request):
             return web.json_response({"error": "geen toegang"}, status=401)
         try:
@@ -376,8 +377,31 @@ class Dashboard:
             return web.json_response({"error": "geen taak-id"}, status=400)
         ok = await asyncio.to_thread(actie, task_id)
         if ok:
-            self._invalidate()
+            # Todoist's lijst-API loopt na een mutatie soms seconden achter; opnieuw
+            # ophalen zou verouderde data cachen. Daarom: cache zelf bijwerken en pas
+            # bij de volgende TTL-verversing weer met Todoist verzoenen.
+            self._gen += 1  # lopende (oude) opbouw mag hier niet meer overheen cachen
+            if self._cache:
+                patch(self._cache, task_id)
         return web.json_response({"ok": ok}, status=200 if ok else 502)
+
+    @staticmethod
+    def _patch_afgevinkt(c: dict, task_id: str) -> None:
+        for lijst, af in (("boodschappen", "boodschappen_af"), ("acties", "acties_af")):
+            for t in c.get(lijst, []):
+                if t["id"] == task_id:
+                    c[lijst] = [x for x in c[lijst] if x["id"] != task_id]
+                    c[af] = ([{"id": task_id, "tekst": t["tekst"]}] + list(c.get(af, [])))[:6]
+                    return
+
+    @staticmethod
+    def _patch_heropend(c: dict, task_id: str) -> None:
+        for lijst, af in (("boodschappen", "boodschappen_af"), ("acties", "acties_af")):
+            for t in c.get(af, []):
+                if t["id"] == task_id:
+                    c[af] = [x for x in c[af] if x["id"] != task_id]
+                    c[lijst] = list(c.get(lijst, [])) + [{"id": task_id, "tekst": t["tekst"], "due": ""}]
+                    return
 
     async def due(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
@@ -394,7 +418,12 @@ class Dashboard:
             return web.json_response({"error": "id of datum ongeldig"}, status=400)
         ok = await asyncio.to_thread(_todoist_deadline, task_id, datum)
         if ok:
-            self._invalidate()
+            self._gen += 1
+            if self._cache:
+                for lijst in ("boodschappen", "acties"):
+                    for t in self._cache.get(lijst, []):
+                        if t["id"] == task_id:
+                            t["due"] = datum
         return web.json_response({"ok": ok}, status=200 if ok else 502)
 
     async def add(self, request: web.Request) -> web.Response:
@@ -408,10 +437,12 @@ class Dashboard:
             lijst, tekst = "", ""
         if lijst not in ("boodschappen", "acties") or not tekst:
             return web.json_response({"error": "lijst of tekst ontbreekt"}, status=400)
-        ok = await asyncio.to_thread(_todoist_toevoegen, lijst, tekst)
-        if ok:
-            self._invalidate()
-        return web.json_response({"ok": ok}, status=200 if ok else 502)
+        taak = await asyncio.to_thread(_todoist_toevoegen, lijst, tekst)
+        if taak:
+            self._gen += 1
+            if self._cache:
+                self._cache[lijst] = list(self._cache.get(lijst, [])) + [taak]
+        return web.json_response({"ok": bool(taak)}, status=200 if taak else 502)
 
     async def message(self, request: web.Request) -> web.Response:
         if not self._authorized(request):

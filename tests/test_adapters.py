@@ -219,6 +219,17 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         finally:
             await d.stop()
 
+    def test_cache_patches(self):
+        from agent.dashboard import Dashboard
+        c = {"boodschappen": [{"id": "1", "tekst": "kwark", "due": ""}],
+             "boodschappen_af": [], "acties": [], "acties_af": []}
+        Dashboard._patch_afgevinkt(c, "1")
+        self.assertEqual(c["boodschappen"], [])
+        self.assertEqual(c["boodschappen_af"][0]["tekst"], "kwark")
+        Dashboard._patch_heropend(c, "1")
+        self.assertEqual(c["boodschappen"][0]["tekst"], "kwark")
+        self.assertEqual(c["boodschappen_af"], [])
+
     def test_overzicht_kort(self):
         from agent.dashboard import _overzicht_kort
         kort = _overzicht_kort(
