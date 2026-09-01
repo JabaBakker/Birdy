@@ -152,6 +152,16 @@ def _todoist_afvinken(task_id: str) -> bool:
         return False
 
 
+def _todoist_heropen(task_id: str) -> bool:
+    from . import todoist
+
+    try:
+        todoist._request("POST", f"/tasks/{task_id}/reopen")
+        return True
+    except BaseException:
+        return False
+
+
 def _todoist_deadline(task_id: str, datum: str) -> bool:
     from . import todoist
 
@@ -223,6 +233,7 @@ class Dashboard:
         app.router.add_post("/api/done", self.done)
         app.router.add_post("/api/add", self.add)
         app.router.add_post("/api/due", self.due)
+        app.router.add_post("/api/reopen", self.reopen)
         app.router.add_get("/logo.png", self.logo)
         app.router.add_get("/logo-bird.png", self.logo)
         self._runner = web.AppRunner(app, access_log=None)
@@ -284,6 +295,12 @@ class Dashboard:
         return web.json_response(data)
 
     async def done(self, request: web.Request) -> web.Response:
+        return await self._taak_actie(request, _todoist_afvinken)
+
+    async def reopen(self, request: web.Request) -> web.Response:
+        return await self._taak_actie(request, _todoist_heropen)
+
+    async def _taak_actie(self, request: web.Request, actie) -> web.Response:
         if not self._authorized(request):
             return web.json_response({"error": "geen toegang"}, status=401)
         try:
@@ -293,7 +310,7 @@ class Dashboard:
             task_id = ""
         if not task_id or len(task_id) > 40:
             return web.json_response({"error": "geen taak-id"}, status=400)
-        ok = await asyncio.to_thread(_todoist_afvinken, task_id)
+        ok = await asyncio.to_thread(actie, task_id)
         if ok:
             self._cache = None
         return web.json_response({"ok": ok}, status=200 if ok else 502)
@@ -409,7 +426,7 @@ PAGE = """<!doctype html>
   .rest { color:var(--dim); font-size:.85rem; margin-top:.45rem; }
   li.vink { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.3rem .4rem; }
   li.vink:active { background:rgba(127,191,166,.12); }
-  li.vink::before { content:"◯"; color:var(--accent); font-size:.9rem; }
+  li.vink::before { content:"◯"; color:var(--pc, var(--accent)); font-size:.9rem; }
   li.vink.gedaan { opacity:.4; text-decoration:line-through; pointer-events:none; }
   li.vink.gedaan::before { content:"✓"; }
   .toevoeg { margin-top:.5rem; }
@@ -457,6 +474,11 @@ PAGE = """<!doctype html>
   #melding { position:fixed; left:1.2rem; bottom:1.2rem; max-width:min(380px,80vw);
              background:var(--panel); border:1px solid var(--amber); border-radius:12px;
              padding:.7rem .9rem; font-size:.92rem; display:none; z-index:60; }
+  #melding button { margin-left:.6rem; border:none; border-radius:8px; padding:.3rem .7rem;
+                    background:var(--accent); color:#14171a; font-size:.85rem; cursor:pointer;
+                    font-weight:600; }
+  .pers { display:inline-block; font-size:.64rem; padding:.04rem .4rem; margin-left:.4rem;
+          border-radius:99px; vertical-align:baseline; }
   #chatfab { position:fixed; right:1.2rem; bottom:1.2rem; width:64px; height:64px; border-radius:50%;
              border:none; background:var(--accent); cursor:pointer; z-index:40; font-size:1.7rem;
              box-shadow:0 4px 20px rgba(0,0,0,.45); display:flex; align-items:center;
@@ -587,11 +609,20 @@ function dueBadge(d){
 // ── weekweergave ──────────────────────────────────────────────────────────
 const KLEUREN = ['#7fbfa6', '#d9a44e', '#e07a6a', '#8ab4d8', '#b39ddb', '#f2a1c2'];
 let PERSONEN = [];
-function kleurVoor(titel){
-  const t = titel.toLowerCase();
+function persoonMatch(tekst){
+  const t = tekst.toLowerCase();
   for (let i = 0; i < PERSONEN.length; i++)
-    if (t.includes(PERSONEN[i].toLowerCase())) return KLEUREN[i % KLEUREN.length];
-  return '#5b6570';
+    if (t.includes(PERSONEN[i].toLowerCase()))
+      return { naam: PERSONEN[i], kleur: KLEUREN[i % KLEUREN.length] };
+  return null;
+}
+function kleurVoor(titel){
+  const p = persoonMatch(titel);
+  return p ? p.kleur : '#5b6570';
+}
+function persChip(tekst){
+  const p = persoonMatch(tekst);
+  return p ? ` <span class="pers" style="background:${p.kleur}22;color:${p.kleur}">${esc(p.naam)}</span>` : '';
 }
 const U0 = 7, U1 = 22, HOOG = 510, PPU = HOOG / (U1 - U0);
 function minuten(iso){ return parseInt(iso.slice(11,13),10)*60 + parseInt(iso.slice(14,16),10); }
@@ -676,15 +707,18 @@ async function ververs(){
     document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
     renderWeek(d.week || []);
     const t = d.taken || {urgent:[],week:[],rest:''};
-    const rows = t.urgent.map(x => `<li class="urgent"><span>${esc(x)}</span></li>`)
-      .concat(t.week.map(x => `<li class="week"><span>${esc(x)}</span></li>`));
+    const rows = t.urgent.map(x => `<li class="urgent"><span>${esc(x)}${persChip(x)}</span></li>`)
+      .concat(t.week.map(x => `<li class="week"><span>${esc(x)}${persChip(x)}</span></li>`));
     document.getElementById('taken').innerHTML =
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
-    const taakRij = x => `<li class="vink" onclick="vink(this,'${x.id}')">` +
-      `<span>${esc(x.tekst)}${dueBadge(x.due)}</span>` +
-      (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
-        ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
+    const taakRij = x => {
+      const p = persoonMatch(x.tekst);
+      return `<li class="vink"${p ? ` style="--pc:${p.kleur}"` : ''} onclick="vink(this,'${x.id}')">` +
+        `<span>${esc(x.tekst)}${dueBadge(x.due)}</span>` +
+        (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
+          ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
+    };
     vul('boodschappen', d.boodschappen, taakRij);
     vul('acties', d.acties, taakRij);
     vul('verjaardagen', d.verjaardagen,
@@ -765,20 +799,40 @@ function kiesDatum(id){
 }
 async function vink(el, id){
   el.classList.add('gedaan');
+  const tekst = (el.querySelector('span')?.childNodes[0]?.textContent || 'taak').trim();
   try {
     const r = await fetch('/api/done', { method:'POST',
       headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
       body: JSON.stringify({ id }) });
     if (!r.ok) throw new Error();
+    toonMetKnop(`✓ Afgevinkt: ${tekst}`, 'Ongedaan maken', () => herstel(id));
     setTimeout(ververs, 800);
   } catch(e){
     el.classList.remove('gedaan');
     toon('Afvinken lukte even niet — probeer nog eens.');
   }
 }
+async function herstel(id){
+  try {
+    const r = await fetch('/api/reopen', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ id }) });
+    if (!r.ok) throw new Error();
+    toon('Hersteld 👍'); ververs();
+  } catch(e){ toon('Herstellen lukte even niet — check de Todoist-app.'); }
+}
 function toon(t){ const a = document.getElementById('melding');
   a.textContent = t; a.style.display = 'block';
   clearTimeout(a._t); a._t = setTimeout(() => a.style.display='none', 8000); }
+function toonMetKnop(t, knoptekst, actie){
+  const a = document.getElementById('melding');
+  a.textContent = t;
+  const b = document.createElement('button');
+  b.textContent = knoptekst;
+  b.onclick = () => { a.style.display = 'none'; actie(); };
+  a.appendChild(b);
+  a.style.display = 'block';
+  clearTimeout(a._t); a._t = setTimeout(() => a.style.display='none', 10000); }
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, luistert = false;
