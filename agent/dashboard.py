@@ -756,10 +756,12 @@ PAGE = """<!doctype html>
             overflow:hidden; white-space:nowrap; border-radius:14px; background:var(--panel);
             border:2px solid var(--lijn); transition:flex-grow 1s linear; }
   .pl-seg .em2 { font-size:1.6rem; }
-  .pl-seg.af2 { flex:0 0 3.1rem !important; opacity:.55; cursor:default;
-                border-color:var(--accent); }
-  .pl-seg.af2::after { content:"✓"; position:absolute; top:.2rem; right:.35rem;
-                       color:var(--accent); font-weight:800; }
+  .pl-stapel { flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
+               justify-content:center; gap:.2rem; border:2px solid var(--accent);
+               border-radius:14px; padding:.3rem .6rem; color:var(--accent);
+               font-weight:800; font-size:.95rem; background:rgba(127,191,166,.08); }
+  .pl-stapel .ems { font-size:1.05rem; letter-spacing:.04em; max-width:4.8rem;
+                    overflow:hidden; white-space:nowrap; }
   .pl-seg.nu2 { border-color:var(--amber); box-shadow:0 5px 16px rgba(0,0,0,.45);
                 transform:translateY(-3px); }
   .pl-seg.bonus { background:rgba(127,191,166,.16) !important; cursor:default;
@@ -1514,15 +1516,17 @@ function renderBalk(el, r, kop){
     `<p class="pl-hint">De rode stip is de klok — blijf hem voor! Alles wat je overhoudt is
       ${BONUS.e} bonustijd. Klaar met een taak? Tik erop!</p>` +
     `<div class="pl-balkwrap"><div class="pl-balk2" id="plBalk2">` +
-    m.segs.map(s => s.bonus
+    (PLAN.af.length ? `<div class="pl-stapel" title="al gedaan!">
+       <span>✓ ${PLAN.af.length}</span>
+       <span class="ems">${PLAN.af.map(a => r[a.i].e).join('')}</span></div>` : '') +
+    m.segs.filter(s => !s.af).map(s => s.bonus
       ? `<div class="pl-seg bonus" id="plSegBonus" style="flex:${s.breed} 1 0">
            <span class="em2">${BONUS.e}</span><span id="plBonus"></span></div>`
-      : `<div class="pl-seg${s.af ? ' af2' : ''}${s.actief ? ' nu2' : ''}" data-i="${s.i}"
+      : `<div class="pl-seg${s.actief ? ' nu2' : ''}" data-i="${s.i}"
            style="flex:${s.breed} 1 0;background:${KLEUREN[s.i % KLEUREN.length]}26"
            onclick="plVier(event, ${s.i})">
-           <span class="em2">${r[s.i].e}</span>` +
-           (s.af ? '' : `<span>${r[s.i].n.split(' ')[0]}</span><span>${r[s.i].m}m</span>`) +
-         `</div>`).join('') +
+           <span class="em2">${r[s.i].e}</span>
+           <span>${r[s.i].n.split(' ')[0]}</span><span>${r[s.i].m}m</span></div>`).join('') +
     `</div>
     <div class="pl-rail"><div class="vul" id="plRailVul"></div>
       <div class="stip" id="plRailStip"></div><div class="nulabel" id="plRailNu"></div></div>
