@@ -55,6 +55,7 @@ def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
                 naam = (org.get("displayName") or wie.get("displayName")
                         or wie.get("email") or org.get("email") or "")
                 events.append({
+                    "id": ev.get("id", ""),
                     "start": (s.get("dateTime") or s.get("date", ""))[:16],
                     "eind": (e.get("dateTime") or e.get("date", ""))[:16],
                     "titel": ev.get("summary", "(zonder titel)"),
@@ -87,6 +88,7 @@ def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
                 start = ev.get("DTSTART").dt
                 eind = ev.get("DTEND")
                 events.append({
+                    "id": "",  # alleen-lezen: FamilyWall-afspraken kunnen niet verzet worden
                     "start": iso(start),
                     "eind": iso(eind.dt if eind else None) or iso(start),
                     "titel": str(ev.get("SUMMARY", "(zonder titel)")),
@@ -223,6 +225,25 @@ def _todoist_toevoegen(lijst: str, tekst: str) -> dict | None:
         return None
 
 
+def _agenda_verzet(event_id: str, start: str, eind: str) -> bool:
+    """Google-afspraak verplaatsen (start/eind als 'YYYY-MM-DDTHH:MM', lokale tijd)."""
+    from . import gcal
+
+    try:
+        svc = gcal._service()
+        svc.events().patch(
+            calendarId=os.environ["GOOGLE_CALENDAR_ID"], eventId=event_id,
+            body={
+                "start": {"dateTime": f"{start}:00", "timeZone": "Europe/Amsterdam"},
+                "end": {"dateTime": f"{eind}:00", "timeZone": "Europe/Amsterdam"},
+            },
+        ).execute()
+        return True
+    except BaseException:
+        log.warning("afspraak verzetten mislukt", exc_info=True)
+        return False
+
+
 def _verjaardagen() -> list[dict]:
     from . import gdrive
 
@@ -284,6 +305,7 @@ class Dashboard:
         app.router.add_post("/api/add", self.add)
         app.router.add_post("/api/due", self.due)
         app.router.add_post("/api/reopen", self.reopen)
+        app.router.add_post("/api/verzet", self.verzet)
         app.router.add_get("/logo.png", self.logo)
         app.router.add_get("/logo-bird.png", self.logo)
         self._runner = web.AppRunner(app, access_log=None)
@@ -437,6 +459,34 @@ class Dashboard:
                             t["due"] = datum
         return web.json_response({"ok": ok}, status=200 if ok else 502)
 
+    async def verzet(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            event_id = str(body.get("id", "")).strip()
+            start = str(body.get("start", "")).strip()
+            eind = str(body.get("eind", "")).strip()
+        except Exception:
+            event_id = start = eind = ""
+
+        def geldig(t: str) -> bool:
+            return len(t) == 16 and t[10] == "T" and t[:10].replace("-", "").isdigit() \
+                and t[11:].replace(":", "").isdigit()
+
+        if not event_id or len(event_id) > 200 or not geldig(start) or not geldig(eind):
+            return web.json_response({"error": "id of tijd ongeldig"}, status=400)
+        ok = await asyncio.to_thread(_agenda_verzet, event_id, start, eind)
+        if ok:
+            self._gen += 1
+            self._cache = None  # agenda-compact opnieuw opbouwen (uit gepatchte week)
+            if self._traag:
+                for e in self._traag["week"]:
+                    if e.get("id") == event_id:
+                        e["start"], e["eind"] = start, eind
+                self._traag["week"].sort(key=lambda e: e["start"])
+        return web.json_response({"ok": ok}, status=200 if ok else 502)
+
     async def add(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
             return web.json_response({"error": "geen toegang"}, status=401)
@@ -573,6 +623,8 @@ PAGE = """<!doctype html>
   .blok b { display:block; font-weight:600; }
   .blok small { color:inherit; opacity:.75; font-size:.64rem; }
   .blok.conflict { outline:1.5px solid var(--rood); }
+  .blok.sleepbaar { touch-action:none; cursor:grab; }
+  .blok.sleept { z-index:30; opacity:.85; cursor:grabbing; box-shadow:0 6px 18px rgba(0,0,0,.5); }
   .legenda { display:flex; gap:1rem; flex-wrap:wrap; margin:.6rem .2rem 0; font-size:.78rem;
              color:var(--dim); }
   .legenda i { display:inline-block; width:.7rem; height:.7rem; border-radius:3px;
@@ -836,15 +888,76 @@ function bouwWeek(events){
       const breedte = 100 / x.cols;
       const tijd = x.ev.start.slice(11,16) +
         ((x.ev.eind && x.ev.eind.length > 10) ? '–' + x.ev.eind.slice(11,16) : '');
-      vak += `<div class="blok${x.cols > 1 ? ' conflict' : ''}"` +
+      const sleepbaar = !!x.ev.id;
+      vak += `<div class="blok${x.cols > 1 ? ' conflict' : ''}${sleepbaar ? ' sleepbaar' : ''}"` +
         ` style="top:${top}px;height:${hoogte}px;border-color:${k};background:${k}26;` +
         `left:calc(${x.col * breedte}% + 3px);width:calc(${breedte}% - 6px);color:var(--ink)"` +
-        ` onclick="detailEv(${x.ev._i})">` +
+        ` onclick="if(!onderdruktKlik)detailEv(${x.ev._i})"` +
+        (sleepbaar ? ` onpointerdown="blokDown(event,${x.ev._i})"` +
+          ` onpointermove="blokMove(event)" onpointerup="blokUp(event)"` +
+          ` onpointercancel="blokUp(event)"` : '') + `>` +
         `<b>${esc(x.ev.titel)}</b><small>${tijd}</small></div>`;
     });
     html += vak + '</div>';
   });
   return html;
+}
+// ── afspraken verslepen (alleen Google; FamilyWall is alleen-lezen) ──
+let sleepData = null, onderdruktKlik = false;
+function blokDown(ev, i){
+  sleepData = { i, el: ev.currentTarget, x0: ev.clientX, y0: ev.clientY, dx: 0, dy: 0, bezig: false };
+  try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch(e){}
+}
+function blokMove(ev){
+  if (!sleepData) return;
+  sleepData.dx = ev.clientX - sleepData.x0;
+  sleepData.dy = ev.clientY - sleepData.y0;
+  if (!sleepData.bezig && Math.abs(sleepData.dx) + Math.abs(sleepData.dy) > 8){
+    sleepData.bezig = true;
+    sleepData.el.classList.add('sleept');
+  }
+  if (sleepData.bezig)
+    sleepData.el.style.transform = `translate(${sleepData.dx}px, ${sleepData.dy}px)`;
+}
+function blokUp(ev){
+  if (!sleepData) return;
+  const s = sleepData; sleepData = null;
+  s.el.style.transform = ''; s.el.classList.remove('sleept');
+  if (!s.bezig) return;  // gewone tik → onclick opent de detailkaart
+  onderdruktKlik = true; setTimeout(() => { onderdruktKlik = false; }, 300);
+  const kolomBreedte = s.el.parentElement.getBoundingClientRect().width + 6;
+  const dagen = Math.round(s.dx / kolomBreedte);
+  const minuten = Math.round((s.dy / PPU) * 60 / 15) * 15;  // per kwartier
+  if (dagen === 0 && minuten === 0) return;
+  const e = WEEK[s.i];
+  const oudS = e.start, oudE = e.eind;
+  verzetNaar(s.i, schuifIso(e.start, dagen, minuten),
+             (e.eind && e.eind.length > 10) ? schuifIso(e.eind, dagen, minuten) : '',
+             () => verzetNaar(s.i, oudS, oudE, null));
+}
+function schuifIso(iso, dagen, minuten){
+  const d = new Date(iso);
+  d.setDate(d.getDate() + dagen); d.setMinutes(d.getMinutes() + minuten);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+async function verzetNaar(i, nieuwS, nieuwE, undo){
+  const e = WEEK[i];
+  nieuwE = nieuwE || nieuwS;
+  const oudS = e.start, oudE = e.eind;
+  e.start = nieuwS; e.eind = nieuwE; renderWeek(WEEK);  // optimistisch
+  try {
+    const r = await fetch('/api/verzet', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ id: e.id, start: nieuwS, eind: nieuwE }) });
+    if (!r.ok) throw new Error();
+    const label = `${dagLabel(nieuwS.slice(0,10))} ${nieuwS.slice(11,16)}`;
+    if (undo) toonMetKnop(`📅 “${e.titel}” verzet naar ${label}`, 'Ongedaan maken', undo);
+    else toon(`📅 “${e.titel}” staat weer op ${label}`);
+  } catch(err){
+    e.start = oudS; e.eind = oudE; renderWeek(WEEK);
+    toon('Verzetten lukte even niet — probeer nog eens.');
+  }
 }
 function detailEv(i){
   const e = WEEK[i]; if (!e) return;
