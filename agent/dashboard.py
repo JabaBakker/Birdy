@@ -692,6 +692,48 @@ PAGE = """<!doctype html>
   #chatinvoer button { border:none; border-radius:10px; padding:0 .85rem; font-size:1.1rem;
                        cursor:pointer; background:var(--accent); color:#14171a; }
   li.klik { cursor:pointer; }
+  /* ── planning (kinderroutine) ── */
+  #paneelPlan { display:none; max-width:600px; margin:0 auto; }
+  .pl-kop { display:flex; align-items:center; gap:.7rem; margin-bottom:1rem; }
+  .pl-kop h2 { font-size:1.35rem; }
+  .pl-dagdeel { margin-left:auto; display:flex; gap:.3rem; background:var(--panel);
+                border-radius:99px; padding:.22rem; }
+  .pl-dagdeel button { border:none; background:none; color:var(--dim); font-size:.95rem;
+                       padding:.4rem .9rem; border-radius:99px; cursor:pointer; }
+  .pl-dagdeel button.actief { background:var(--amber); color:#14171a; font-weight:700; }
+  .pl-hint { color:var(--dim); margin-bottom:.8rem; font-size:1rem; }
+  .pl-lijst { list-style:none; padding:0; display:flex; flex-direction:column; gap:.55rem; }
+  .pl-kaart { background:var(--panel); border:2px solid var(--lijn); border-radius:16px;
+              padding:1rem 1.1rem; display:flex; align-items:center; gap:.9rem;
+              font-size:1.2rem; user-select:none; -webkit-user-select:none;
+              position:relative; overflow:hidden; }
+  .pl-kaart.sleepbaar { touch-action:none; cursor:grab; }
+  .pl-kaart .em { font-size:2rem; }
+  .pl-kaart .naam { font-weight:600; }
+  .pl-kaart .tijd { margin-left:auto; color:var(--dim); font-size:.95rem; white-space:nowrap; }
+  .pl-kaart.tilt { z-index:5; box-shadow:0 10px 28px rgba(0,0,0,.55); border-color:var(--accent); }
+  .pl-kaart .balk { position:absolute; left:0; bottom:0; height:6px; background:var(--amber);
+                    width:0%; border-radius:0 3px 3px 0; transition:width 1s linear; }
+  .pl-kaart.nu { border-color:var(--amber); }
+  .pl-kaart.nu .naam::after { content:" ⏰"; }
+  .pl-kaart.af { opacity:.5; border-color:var(--accent); }
+  .pl-kaart.af .naam { text-decoration:line-through; }
+  .pl-kaart.af .balk { background:var(--accent); width:100% !important; }
+  .pl-vink { width:2.4rem; height:2.4rem; border-radius:50%; border:2px solid var(--accent);
+             background:none; color:var(--accent); font-size:1.3rem; cursor:pointer;
+             flex:0 0 auto; padding:0; }
+  .pl-kaart.af .pl-vink { background:var(--accent); color:#14171a; }
+  .pl-start { width:100%; margin-top:1.1rem; padding:1.1rem; font-size:1.35rem; border:none;
+              border-radius:16px; background:var(--accent); color:#14171a; font-weight:800;
+              cursor:pointer; }
+  .pl-reset { margin-top:1rem; background:none; border:none; color:var(--dim);
+              font-size:.85rem; cursor:pointer; text-decoration:underline; }
+  #plCanvas { position:fixed; inset:0; pointer-events:none; z-index:90; }
+  #plKlaar { position:fixed; inset:0; background:rgba(20,23,26,.88); display:none;
+             align-items:center; justify-content:center; flex-direction:column; gap:1rem;
+             z-index:85; text-align:center; }
+  #plKlaar h1 { font-size:clamp(2.2rem,8vw,4rem); }
+  #plKlaar p { color:var(--dim); font-size:1.2rem; }
   #l2 { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
         align-items:center; justify-content:center; z-index:65; }
   #l2kaart { background:var(--panel); border:1px solid var(--lijn); border-radius:16px;
@@ -757,6 +799,7 @@ PAGE = """<!doctype html>
     <div id="tabs">
       <button id="tabVandaag" class="actief" onclick="kiesTab('vandaag')">Vandaag</button>
       <button id="tabWeek" onclick="kiesTab('week')">Week</button>
+      <button id="tabPlan" onclick="kiesTab('plan')">Planning</button>
     </div>
     <div id="klok"></div>
   </header>
@@ -786,8 +829,12 @@ PAGE = """<!doctype html>
     <div class="wkwrap"><div class="wk" id="wkgrid"></div></div>
     <div class="legenda" id="legenda"></div>
   </div>
+  <div id="paneelPlan"></div>
 </div>
 <div id="melding"></div>
+<canvas id="plCanvas"></canvas>
+<div id="plKlaar" onclick="this.style.display='none'">
+  <h1>🎉 Goed gedaan! 🎉</h1><p>Alles is af — wat ging dat snel!</p></div>
 <div id="l2" onclick="sluitL2()">
   <div id="l2kaart" onclick="event.stopPropagation()">
     <div id="l2kop"><h3 id="l2Titel"></h3><button onclick="sluitL2()" title="Sluiten">✕</button></div>
@@ -836,9 +883,12 @@ function zetSleutel(){ KEY = document.getElementById('sleutelveld').value.trim()
 function kiesTab(t){
   document.getElementById('paneelVandaag').style.display = t === 'vandaag' ? 'grid' : 'none';
   document.getElementById('paneelWeek').style.display = t === 'week' ? 'block' : 'none';
+  document.getElementById('paneelPlan').style.display = t === 'plan' ? 'block' : 'none';
   document.getElementById('tabVandaag').classList.toggle('actief', t === 'vandaag');
   document.getElementById('tabWeek').classList.toggle('actief', t === 'week');
+  document.getElementById('tabPlan').classList.toggle('actief', t === 'plan');
   try { localStorage.setItem('birdy-tab', t); } catch(e){}
+  if (t === 'plan') renderPlan();
 }
 
 function vul(id, items, maak){ const el = document.getElementById(id);
@@ -1210,6 +1260,180 @@ function toonSleutel(){ document.getElementById('app').style.display='none';
   document.getElementById('sleutel').style.display='block'; }
 try { kiesTab(localStorage.getItem('birdy-tab') || 'vandaag'); } catch(e){ kiesTab('vandaag'); }
 ververs(); setInterval(ververs, 60000);
+
+// ── planning: kinderroutine met sleepvolgorde, tijdbalken en feest ────────
+const ROUTINES = {
+  ochtend: [
+    { e:'🚽', n:'Naar de wc', m:3 },
+    { e:'👕', n:'Aankleden', m:5 },
+    { e:'🥣', n:'Ontbijten', m:15 },
+    { e:'🪥', n:'Tandenpoetsen', m:3 },
+    { e:'🎒', n:'Tas en schoenen', m:4 },
+  ],
+  avond: [
+    { e:'🧸', n:'Speelgoed opruimen', m:5 },
+    { e:'🛁', n:'Wassen', m:10 },
+    { e:'🩳', n:'Pyjama aan', m:3 },
+    { e:'🪥', n:'Tandenpoetsen', m:3 },
+    { e:'📖', n:'Boekje lezen', m:10 },
+  ],
+};
+function plVandaag(){ return new Date().toLocaleDateString('sv-SE'); }
+function plLeeg(dagdeel){
+  return { datum: plVandaag(), dagdeel,
+           volgorde: ROUTINES[dagdeel].map((_, i) => i), start: 0, af: [] };
+}
+function plLaad(){
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem('birdy-plan')); } catch(e){}
+  if (!s || s.datum !== plVandaag())
+    s = plLeeg(new Date().getHours() < 14 ? 'ochtend' : 'avond');
+  return s;
+}
+let PLAN = plLaad();
+function plBewaar(){ try { localStorage.setItem('birdy-plan', JSON.stringify(PLAN)); } catch(e){} }
+function plDagdeel(d){ PLAN = plLeeg(d); plBewaar(); renderPlan(); }
+function plReset(){ PLAN = plLeeg(PLAN.dagdeel); plBewaar(); renderPlan(); }
+function plStart(){ PLAN.start = Date.now(); plBewaar(); renderPlan(); deuntje(); }
+
+function renderPlan(){
+  const el = document.getElementById('paneelPlan');
+  const r = ROUTINES[PLAN.dagdeel];
+  const kop = `<div class="pl-kop"><h2>${PLAN.dagdeel === 'ochtend' ? '🌞 Goedemorgen!' : '🌙 Avondprogramma'}</h2>
+    <div class="pl-dagdeel">
+      <button class="${PLAN.dagdeel==='ochtend'?'actief':''}" onclick="plDagdeel('ochtend')">Ochtend</button>
+      <button class="${PLAN.dagdeel==='avond'?'actief':''}" onclick="plDagdeel('avond')">Avond</button>
+    </div></div>`;
+  if (!PLAN.start){
+    el.innerHTML = kop +
+      `<p class="pl-hint">Sleep de kaartjes in jouw volgorde — wat doe je eerst?</p>` +
+      `<ul class="pl-lijst" id="plLijst">` + PLAN.volgorde.map(i => {
+        const t = r[i];
+        return `<li class="pl-kaart sleepbaar" data-i="${i}"
+          onpointerdown="plDown(event)" onpointermove="plMove(event)"
+          onpointerup="plUp(event)" onpointercancel="plUp(event)">
+          <span class="em">${t.e}</span><span class="naam">${t.n}</span>
+          <span class="tijd">${t.m} min</span></li>`;
+      }).join('') + `</ul>` +
+      `<button class="pl-start" onclick="plStart()">Start! ▶</button>`;
+  } else {
+    el.innerHTML = kop +
+      `<ul class="pl-lijst">` + PLAN.volgorde.map(i => {
+        const t = r[i];
+        const af = PLAN.af.includes(i);
+        return `<li class="pl-kaart${af ? ' af' : ''}" data-i="${i}" onclick="plVier(event, ${i})">
+          <span class="em">${t.e}</span><span class="naam">${t.n}</span>
+          <span class="tijd">${t.m} min</span>
+          <button class="pl-vink">${af ? '✓' : ''}</button>
+          <div class="balk"></div></li>`;
+      }).join('') + `</ul>` +
+      `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
+    plTick();
+  }
+}
+// slepen (kaartjes hebben gelijke hoogte; DOM-nodes verplaatsen behoudt de pointer-capture)
+let plSleepData = null;
+function plDown(ev){
+  const li = ev.currentTarget;
+  plSleepData = { li, y0: ev.clientY, h: li.offsetHeight + 9 };
+  try { li.setPointerCapture(ev.pointerId); } catch(e){}
+  li.classList.add('tilt');
+  // vangnet: loslaten buiten het kaartje (of verloren capture) altijd afronden
+  window.addEventListener('pointerup', plUp, { once: true });
+  window.addEventListener('pointercancel', plUp, { once: true });
+}
+function plMove(ev){
+  if (!plSleepData) return;
+  const s = plSleepData, dy = ev.clientY - s.y0;
+  s.li.style.transform = `translateY(${dy}px)`;
+  if (dy > s.h * 0.55 && s.li.nextElementSibling){
+    s.li.parentNode.insertBefore(s.li, s.li.nextElementSibling.nextElementSibling);
+    s.y0 += s.h; s.li.style.transform = `translateY(${ev.clientY - s.y0}px)`;
+  } else if (dy < -s.h * 0.55 && s.li.previousElementSibling){
+    s.li.parentNode.insertBefore(s.li, s.li.previousElementSibling);
+    s.y0 -= s.h; s.li.style.transform = `translateY(${ev.clientY - s.y0}px)`;
+  }
+}
+function plUp(ev){
+  if (!plSleepData) return;
+  const s = plSleepData; plSleepData = null;
+  s.li.style.transform = ''; s.li.classList.remove('tilt');
+  PLAN.volgorde = [...document.querySelectorAll('#plLijst .pl-kaart')]
+    .map(k => parseInt(k.dataset.i, 10));
+  plBewaar();
+}
+function plTick(){
+  if (!PLAN.start || document.getElementById('paneelPlan').style.display === 'none') return;
+  const r = ROUTINES[PLAN.dagdeel];
+  const sec = (Date.now() - PLAN.start) / 1000;
+  let cum = 0, nuIdx = -1;
+  PLAN.volgorde.forEach(i => {
+    const kaart = document.querySelector(`#paneelPlan .pl-kaart[data-i="${i}"]`);
+    if (!kaart) return;
+    const dur = r[i].m * 60;
+    const frac = Math.max(0, Math.min(1, (sec - cum) / dur));
+    const balk = kaart.querySelector('.balk');
+    if (balk && !PLAN.af.includes(i)) balk.style.width = (frac * 100) + '%';
+    if (nuIdx === -1 && sec < cum + dur) nuIdx = i;
+    kaart.classList.toggle('nu', i === nuIdx && !PLAN.af.includes(i));
+    cum += dur;
+  });
+}
+setInterval(plTick, 1000);
+function plVier(ev, i){
+  if (PLAN.af.includes(i)) return;
+  PLAN.af.push(i); plBewaar();
+  const kaart = ev.currentTarget.getBoundingClientRect();
+  confetti(kaart.left + kaart.width / 2, kaart.top + kaart.height / 2, 60);
+  renderPlan();
+  if (PLAN.af.length === ROUTINES[PLAN.dagdeel].length){
+    document.getElementById('plKlaar').style.display = 'flex';
+    confetti(innerWidth / 2, innerHeight / 3, 220);
+    fanfare();
+    setTimeout(() => { document.getElementById('plKlaar').style.display = 'none'; }, 6000);
+  } else { deuntje(); }
+}
+// confetti + geluid (zelfvoorzienend, geen externe bestanden)
+function confetti(x, y, n){
+  const c = document.getElementById('plCanvas');
+  c.width = innerWidth; c.height = innerHeight;
+  const ctx = c.getContext('2d');
+  const kleuren = ['#7fbfa6', '#d9a44e', '#e07a6a', '#8ab4d8', '#b39ddb', '#f2a1c2'];
+  const p = Array.from({ length: n }, () => ({
+    x, y, vx: (Math.random() - .5) * 14, vy: -Math.random() * 12 - 3,
+    r: Math.random() * 5 + 3, k: kleuren[Math.floor(Math.random() * kleuren.length)],
+    a: Math.random() * Math.PI }));
+  const t0 = performance.now();
+  (function stap(t){
+    const dt = (t - t0) / 1000;
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (dt > 1.8) return;
+    p.forEach(d => {
+      d.x += d.vx; d.y += d.vy; d.vy += .45; d.a += .2;
+      ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.a);
+      ctx.fillStyle = d.k; ctx.globalAlpha = Math.max(0, 1 - dt / 1.8);
+      ctx.fillRect(-d.r, -d.r / 2, d.r * 2, d.r); ctx.restore();
+    });
+    requestAnimationFrame(stap);
+  })(t0);
+}
+let audioCtx = null;
+function noot(freq, wanneer, duur){
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'triangle'; o.frequency.value = freq;
+    const t = audioCtx.currentTime + wanneer;
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + duur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + duur + 0.05);
+  } catch(e){}
+}
+function deuntje(){ [523, 659, 784].forEach((f, i) => noot(f, i * 0.12, 0.28)); }
+function fanfare(){ [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => noot(f, i * 0.16, 0.34)); }
+try { if (localStorage.getItem('birdy-tab') === 'plan') kiesTab('plan'); } catch(e){}
 
 // ── chat ──────────────────────────────────────────────────────────────────
 let chatGesch = [];
