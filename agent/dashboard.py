@@ -728,6 +728,9 @@ PAGE = """<!doctype html>
               cursor:pointer; }
   .pl-reset { margin-top:1rem; background:none; border:none; color:var(--dim);
               font-size:.85rem; cursor:pointer; text-decoration:underline; }
+  #paneelPlan.breed { max-width:none; }
+  .pl-sterren { font-size:1.05rem; letter-spacing:.12em; line-height:1.5; word-break:break-all; }
+  .pl-bonuskaart { transition:min-height .6s; }
   .pl-versie { display:flex; gap:.3rem; background:var(--panel); border-radius:99px; padding:.22rem; }
   .pl-versie button { border:none; background:none; color:var(--dim); font-size:.9rem;
                       padding:.35rem .8rem; border-radius:99px; cursor:pointer; }
@@ -1304,7 +1307,7 @@ function toonSleutel(){ document.getElementById('app').style.display='none';
 try { kiesTab(localStorage.getItem('birdy-tab') || 'vandaag'); } catch(e){ kiesTab('vandaag'); }
 ververs(); setInterval(ververs, 60000);
 
-// ── planning: kinderroutine met slots, twee weergaven en bonus ────────────
+// ── planning: kinderroutine met slots, drie weergaven en bonus ────────────
 const ROUTINES = {
   ochtend: [
     { e:'🚽', n:'Naar de wc', m:3 },
@@ -1338,37 +1341,59 @@ function plLaad(){
   return s;
 }
 let PLAN = plLaad();
+let plWaarsch = null, plWaarschVertrek = false;
 function plBewaar(){ try { localStorage.setItem('birdy-plan', JSON.stringify(PLAN)); } catch(e){} }
 function plDagdeel(d){ PLAN = plLeeg(d); PLAN.dagdeel = d;
   PLAN.vertrek = d === 'ochtend' ? '08:00' : '19:30'; plBewaar(); renderPlan(); }
 function plVersie(v){ PLAN.versie = v;
   try { localStorage.setItem('birdy-plan-versie', v); } catch(e){}
   plBewaar(); renderPlan(); }
-function plReset(){ PLAN = plLeeg(PLAN.dagdeel); plBewaar(); renderPlan(); }
+function plReset(){ PLAN = plLeeg(PLAN.dagdeel); plWaarsch = null; plWaarschVertrek = false;
+  plBewaar(); renderPlan(); }
 function plStart(){
   if (!PLAN.gekozen.length) { toon('Sleep eerst wat kaartjes naar links!'); return; }
   const t = document.getElementById('plVertrek');
   if (t && t.value) PLAN.vertrek = t.value;
-  PLAN.start = Date.now(); PLAN.af = []; plBewaar(); renderPlan(); deuntje();
+  PLAN.start = Date.now(); PLAN.af = []; plWaarsch = null; plWaarschVertrek = false;
+  plBewaar(); renderPlan(); deuntje();
 }
 function plKaartHtml(t, extra){
   return `<span class="em">${t.e}</span><span class="naam">${t.n}</span>` +
          `<span class="tijd">${t.m} min</span>` + (extra || '');
 }
+// actieve taak = eerste onafgevinkte in de gekozen volgorde; die start zodra de
+// vorige is afgevinkt (dus vroeg klaar = volgende kaart begint direct te lopen)
+function plActief(){ return PLAN.gekozen[PLAN.af.length]; }
+function plActiefStart(){
+  return PLAN.af.length ? PLAN.af[PLAN.af.length - 1].t : PLAN.start;
+}
+function bonusMinuten(){
+  const r = ROUTINES[PLAN.dagdeel];
+  const klaarPlanned = PLAN.af.reduce((som, a) => som + r[a.i].m, 0);
+  const alles = PLAN.af.length === PLAN.gekozen.length;
+  const eind = alles && PLAN.af.length
+    ? (PLAN.af[PLAN.af.length - 1].t - PLAN.start) / 60000
+    : (Date.now() - PLAN.start) / 60000;
+  return Math.max(0, Math.round(BONUS.basis + klaarPlanned - eind));
+}
 function renderPlan(){
   const el = document.getElementById('paneelPlan');
+  el.classList.toggle('breed', !!PLAN.start && PLAN.versie === 'balk');
   const r = ROUTINES[PLAN.dagdeel];
   const kop = `<div class="pl-kop"><h2>${PLAN.dagdeel === 'ochtend' ? '🌞 Goedemorgen!' : '🌙 Avondprogramma'}</h2>
     <div class="pl-versie">
       <button class="${PLAN.versie==='kaart'?'actief':''}" onclick="plVersie('kaart')">Kaartjes</button>
       <button class="${PLAN.versie==='balk'?'actief':''}" onclick="plVersie('balk')">Tijdlijn</button>
+      <button class="${PLAN.versie==='ster'?'actief':''}" onclick="plVersie('ster')">Sterren</button>
     </div>
     <div class="pl-dagdeel">
       <button class="${PLAN.dagdeel==='ochtend'?'actief':''}" onclick="plDagdeel('ochtend')">Ochtend</button>
       <button class="${PLAN.dagdeel==='avond'?'actief':''}" onclick="plDagdeel('avond')">Avond</button>
     </div></div>`;
   if (!PLAN.start){ renderOpzet(el, r, kop); return; }
-  if (PLAN.versie === 'balk') renderBalk(el, r, kop); else renderKaarten(el, r, kop);
+  if (PLAN.versie === 'balk') renderBalk(el, r, kop);
+  else if (PLAN.versie === 'ster') renderSterren(el, r, kop);
+  else renderKaarten(el, r, kop);
   plTick();
 }
 // ── opzet: placeholders links, voorraad rechts ──
@@ -1415,7 +1440,7 @@ function plLos(ev){
   if (!plPakData) return;
   const s = plPakData; plPakData = null;
   s.li.style.transform = ''; s.li.style.zIndex = ''; s.li.classList.remove('tilt');
-  if (!s.bezig){  // gewoon tikken = in het volgende vrije vakje
+  if (!s.bezig){
     PLAN.gekozen.push(s.i); plBewaar(); renderPlan(); return;
   }
   s.li.style.visibility = 'hidden';
@@ -1428,22 +1453,14 @@ function plLos(ev){
     plBewaar(); renderPlan();
   }
 }
-// ── bonusberekening (gedeeld): sneller = meer, langzamer = minder ──
-function bonusMinuten(){
-  const r = ROUTINES[PLAN.dagdeel];
-  const klaarPlanned = PLAN.af.reduce((som, a) => som + r[a.i].m, 0);
-  const alles = PLAN.af.length === PLAN.gekozen.length;
-  const eind = alles && PLAN.af.length
-    ? (PLAN.af[PLAN.af.length - 1].t - PLAN.start) / 60000
-    : (Date.now() - PLAN.start) / 60000;
-  return Math.max(0, Math.round(BONUS.basis + klaarPlanned - eind));
-}
-// ── weergave 1: kaartjes ──
+// ── weergave 1: kaartjes (opeenvolgend: balk van de actieve taak loopt) ──
 function renderKaarten(el, r, kop){
+  const actief = plActief();
   el.innerHTML = kop +
     `<ul class="pl-lijst">` + PLAN.gekozen.map(i => {
       const t = r[i], af = PLAN.af.some(a => a.i === i);
-      return `<li class="pl-kaart${af ? ' af' : ''}" data-i="${i}" onclick="plVier(event, ${i})">
+      return `<li class="pl-kaart${af ? ' af' : ''}${i === actief ? ' nu' : ''}" data-i="${i}"
+        onclick="plVier(event, ${i})">
         ${plKaartHtml(t, `<button class="pl-vink">${af ? '✓' : ''}</button><div class="balk"></div>`)}</li>`;
     }).join('') + `</ul>` +
     `<div class="pl-bonuskaart"><span class="em">${BONUS.e}</span>
@@ -1460,15 +1477,15 @@ function balkModel(){
   let totaal = hmNaarMin(PLAN.vertrek) - startMin;
   if (totaal < somPlanned + 2) totaal = somPlanned + BONUS.basis;
   const nu = (Date.now() - PLAN.start) / 60000;
+  const actief = plActief();
   const segs = []; let vorige = 0;
   PLAN.gekozen.forEach(i => {
     const afRec = PLAN.af.find(a => a.i === i);
-    const eerstePending = !afRec && !segs.some(s => !s.af && !s.bonus);
     let breed;
     if (afRec){ breed = Math.max(.7, (afRec.t - PLAN.start) / 60000 - vorige); }
-    else if (eerstePending){ breed = Math.max(r[i].m, nu - vorige); }
+    else if (i === actief){ breed = Math.max(r[i].m, nu - vorige); }
     else { breed = r[i].m; }
-    segs.push({ i, af: !!afRec, actief: eerstePending, breed });
+    segs.push({ i, af: !!afRec, actief: i === actief, breed });
     vorige += breed;
   });
   const bonus = Math.max(0, totaal - vorige);
@@ -1481,7 +1498,7 @@ function renderBalk(el, r, kop){
     `<p class="pl-hint">De rode pijl is de klok — blijf hem voor! Alles wat je overhoudt is
       ${BONUS.e} bonustijd. Klaar met een taak? Tik erop!</p>` +
     `<div class="pl-balkwrap"><div class="pl-balk2" id="plBalk2">` +
-    m.segs.map((s, k) => s.bonus
+    m.segs.map(s => s.bonus
       ? `<div class="pl-seg bonus" id="plSegBonus"><span class="em2">${BONUS.e}</span><span id="plBonus"></span></div>`
       : `<div class="pl-seg${s.af ? ' af2' : ''}${s.actief ? ' nu2' : ''}" data-i="${s.i}"
            style="background:${KLEUREN[s.i % KLEUREN.length]}30"
@@ -1492,53 +1509,94 @@ function renderBalk(el, r, kop){
     `<div class="pl-tijd-rij"><span>🏁 ${PLAN.dagdeel === 'ochtend' ? 'Vertrek' : 'Bedtijd'}: ${PLAN.vertrek}</span></div>` +
     `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
 }
+// ── weergave 3: sterren (blokhoogte = tijd; vroeg klaar = blok krimpt, bonus groeit) ──
+function renderSterren(el, r, kop){
+  const actief = plActief();
+  const px = 9;  // hoogte per minuut
+  el.innerHTML = kop +
+    `<p class="pl-hint">Snel klaar? Dan wordt jouw ${BONUS.e}-blok groter en verdien je sterren! ⭐</p>` +
+    `<ul class="pl-lijst">` + PLAN.gekozen.map(i => {
+      const t = r[i];
+      const afRec = PLAN.af.find(a => a.i === i);
+      const volgIdx = PLAN.gekozen.indexOf(i);
+      let minuten = t.m;
+      if (afRec){
+        const vorigeT = volgIdx === 0 ? PLAN.start : PLAN.af[volgIdx - 1].t;
+        minuten = Math.max(1, (afRec.t - vorigeT) / 60000);
+      }
+      const hoogte = Math.max(afRec ? 2.4 : 3.6, minuten * px / 16) + 'rem';
+      return `<li class="pl-kaart${afRec ? ' af' : ''}${i === actief ? ' nu' : ''}" data-i="${i}"
+        style="min-height:${hoogte};height:${hoogte};transition:height .6s"
+        onclick="plVier(event, ${i})">
+        ${plKaartHtml(t, `<button class="pl-vink">${afRec ? '✓' : ''}</button><div class="balk"></div>`)}</li>`;
+    }).join('') + `</ul>` +
+    `<div class="pl-bonuskaart" id="plBonusGroei"><span class="em">${BONUS.e}</span>
+      <span><span class="naam">${BONUS.n}</span><br><span class="pl-sterren" id="plSterren"></span></span>
+      <b id="plBonus"></b></div>` +
+    `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>`;
+}
 function plTick(){
   if (!PLAN.start || document.getElementById('paneelPlan').style.display === 'none') return;
   const r = ROUTINES[PLAN.dagdeel];
   const bonus = bonusMinuten();
   const bonusEl = document.getElementById('plBonus');
+  const actief = plActief();
+  // waarschuwing: nog 1 minuut voor de actieve taak
+  if (actief !== undefined){
+    const rest = r[actief].m * 60 - (Date.now() - plActiefStart()) / 1000;
+    if (rest <= 60 && rest > 0 && plWaarsch !== actief){ plWaarsch = actief; attentie(); }
+  }
   if (PLAN.versie === 'balk'){
     const m = balkModel();
     m.segs.forEach(s => {
       const el = s.bonus ? document.getElementById('plSegBonus')
         : document.querySelector(`.pl-seg[data-i="${s.i}"]`);
       if (el) el.style.width = (s.breed / m.totaal * 100) + '%';
-      if (el && !s.bonus){ el.classList.toggle('nu2', !!s.actief); }
+      if (el && !s.bonus) el.classList.toggle('nu2', !!s.actief);
     });
     const cursor = document.getElementById('plCursor');
     if (cursor) cursor.style.left = Math.min(99.5, m.nu / m.totaal * 100) + '%';
     if (bonusEl) bonusEl.textContent = m.bonusMin + ' min';
+    // waarschuwing: nog 1 minuut tot vertrek/bedtijd
+    const restTot = m.totaal - m.nu;
+    if (restTot <= 1 && restTot > 0 && !plWaarschVertrek){ plWaarschVertrek = true; attentie(); }
   } else {
-    const sec = (Date.now() - PLAN.start) / 1000;
-    let cum = 0, nuGezet = false;
+    // kaartjes & sterren: alleen de actieve kaart loopt, direct na de vorige afvink
+    const startAct = plActiefStart();
     PLAN.gekozen.forEach(i => {
       const kaart = document.querySelector(`#paneelPlan .pl-kaart[data-i="${i}"]`);
-      const af = PLAN.af.some(a => a.i === i);
-      const dur = r[i].m * 60;
-      if (kaart){
-        const balk = kaart.querySelector('.balk');
-        if (balk && !af) balk.style.width = (Math.max(0, Math.min(1, (sec - cum) / dur)) * 100) + '%';
-        const isNu = !nuGezet && sec < cum + dur && !af;
-        kaart.classList.toggle('nu', isNu);
-        if (isNu) nuGezet = true;
-      }
-      cum += dur;
+      if (!kaart) return;
+      const balk = kaart.querySelector('.balk');
+      if (!balk) return;
+      if (PLAN.af.some(a => a.i === i)) return;  // af = 100% via CSS
+      if (i === actief){
+        const frac = Math.min(1, (Date.now() - startAct) / 60000 / r[i].m);
+        balk.style.width = (frac * 100) + '%';
+        balk.style.background = frac >= 1 ? 'var(--rood)' : '';
+      } else { balk.style.width = '0%'; }
     });
     if (bonusEl) bonusEl.textContent = bonus + ' min';
     const bb = document.getElementById('plBonusBalk');
     if (bb) bb.style.width = Math.min(100, bonus / (BONUS.basis * 3) * 100) + '%';
+    const groei = document.getElementById('plBonusGroei');
+    if (groei){
+      groei.style.minHeight = (3.4 + bonus * 0.35) + 'rem';
+      const sterren = document.getElementById('plSterren');
+      if (sterren) sterren.textContent = '⭐'.repeat(Math.min(bonus, 15));
+    }
   }
 }
 setInterval(plTick, 1000);
 function plVier(ev, i){
   if (PLAN.af.some(a => a.i === i)) return;
-  if (PLAN.versie === 'balk'){  // op de tijdlijn: alleen de actieve taak (volgorde!)
-    const eerste = PLAN.gekozen.find(g => !PLAN.af.some(a => a.i === g));
-    if (i !== eerste) return;
-  }
+  if (i !== plActief()) return;  // altijd in de gekozen volgorde
+  const r = ROUTINES[PLAN.dagdeel];
+  const gebruikt = (Date.now() - plActiefStart()) / 60000;
+  const verdiend = Math.round(r[i].m - gebruikt);
   PLAN.af.push({ i, t: Date.now() }); plBewaar();
   const rect = ev.currentTarget.getBoundingClientRect();
   confetti(rect.left + rect.width / 2, rect.top + rect.height / 2, 60);
+  if (verdiend > 0) popEffect(rect.right - 40, rect.top, `+${verdiend} min ⭐`);
   renderPlan();
   if (PLAN.af.length === PLAN.gekozen.length){
     const einde = document.getElementById('plKlaar');
@@ -1550,6 +1608,16 @@ function plVier(ev, i){
     setTimeout(() => { einde.style.display = 'none'; }, 7000);
   } else { deuntje(); }
 }
+function popEffect(x, y, tekst){
+  const d = document.createElement('div');
+  d.textContent = tekst;
+  d.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:95;font-size:1.3rem;` +
+    `font-weight:800;color:var(--amber);pointer-events:none;white-space:nowrap`;
+  document.body.appendChild(d);
+  d.animate([{ transform:'translateY(0)', opacity:1 }, { transform:'translateY(-70px)', opacity:0 }],
+            { duration: 1400, easing:'ease-out' }).onfinish = () => d.remove();
+}
+function attentie(){ [880, 660, 880].forEach((f, i) => noot(f, i * 0.22, 0.3)); }
 // confetti + geluid (zelfvoorzienend, geen externe bestanden)
 function confetti(x, y, n){
   const c = document.getElementById('plCanvas');
