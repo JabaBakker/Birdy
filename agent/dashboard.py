@@ -29,9 +29,13 @@ log = logging.getLogger("fien.dashboard")
 CACHE_TTL = 120  # seconden
 
 
-def _agenda_rijk(days: int = 7) -> list[dict]:
-    """Afspraken mét eindtijd, voor de weekweergave. [{start, eind, titel}] (ISO)."""
+def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
+    """Afspraken mét eindtijd, voor de weekweergave: ([{start, eind, titel, …}], compleet).
+    compleet=False als een bron faalde — dan is het resultaat mogelijk (deels) leeg en
+    houdt de cache liever de vorige complete versie vast."""
     events: list[dict] = []
+    google_ok = not os.environ.get("GOOGLE_CALENDAR_ID")
+    fw_ok = not os.environ.get("FAMILYWALL_ICS_URL")
     try:
         from . import gcal
         if os.environ.get("GOOGLE_CALENDAR_ID"):
@@ -59,8 +63,9 @@ def _agenda_rijk(days: int = 7) -> list[dict]:
                     "wie": naam.replace("bakkerbirdy@gmail.com", "Birdy"),
                     "bron": "Gezinsagenda (Google)",
                 })
+            google_ok = True
     except BaseException:  # SystemExit van de CLI-helpers telt ook
-        pass
+        log.warning("Google-agenda ophalen mislukt", exc_info=True)
     try:
         url = os.environ.get("FAMILYWALL_ICS_URL", "")
         if url:
@@ -90,8 +95,9 @@ def _agenda_rijk(days: int = 7) -> list[dict]:
                     "wie": "",
                     "bron": "FamilyWall",
                 })
+            fw_ok = True
     except BaseException:
-        pass
+        log.warning("FamilyWall ophalen mislukt", exc_info=True)
     # zelfde moment + titel uit beide bronnen → één keer
     seen, uniek = set(), []
     for ev in sorted(events, key=lambda e: e["start"]):
@@ -100,7 +106,7 @@ def _agenda_rijk(days: int = 7) -> list[dict]:
             continue
         seen.add(key)
         uniek.append(ev)
-    return uniek[:60]
+    return uniek[:60], google_ok and fw_ok
 
 
 def _agenda_compact(rijk: list[dict]) -> list[dict]:
@@ -329,12 +335,17 @@ class Dashboard:
     async def _bouw(self) -> dict:
         gen = self._gen
         if not self._traag or time.time() - self._traag_ts > CACHE_TTL:
-            week, jarigen = await asyncio.gather(
+            (week, compleet), jarigen = await asyncio.gather(
                 asyncio.to_thread(_agenda_rijk),
                 asyncio.to_thread(_verjaardagen),
             )
-            self._traag = {"week": week, "verjaardagen": jarigen}
-            self._traag_ts = time.time()
+            if compleet or not self._traag:
+                self._traag = {"week": week, "verjaardagen": jarigen}
+                self._traag_ts = time.time()
+            else:
+                # een bron faalde: houd de vorige complete week vast en probeer bij de
+                # volgende aanvraag meteen opnieuw (ts bewust niet bijgewerkt)
+                self._traag["verjaardagen"] = jarigen
         boodschappen, acties, boodschappen_af, acties_af = await asyncio.gather(
             asyncio.to_thread(_todoist_lijst, "boodschappen"),
             asyncio.to_thread(_todoist_lijst, "acties"),
