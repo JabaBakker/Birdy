@@ -756,12 +756,36 @@ PAGE = """<!doctype html>
             overflow:hidden; white-space:nowrap; border-radius:14px; background:var(--panel);
             border:2px solid var(--lijn); transition:flex-grow 1s linear; }
   .pl-seg .em2 { font-size:1.6rem; }
-  .pl-stapel { flex:0 0 auto; display:flex; flex-direction:column; align-items:center;
-               justify-content:center; gap:.2rem; border:2px solid var(--accent);
-               border-radius:14px; padding:.3rem .6rem; color:var(--accent);
-               font-weight:800; font-size:.95rem; background:rgba(127,191,166,.08); }
-  .pl-stapel .ems { font-size:1.05rem; letter-spacing:.04em; max-width:4.8rem;
-                    overflow:hidden; white-space:nowrap; }
+  .pl-plank { display:flex; gap:.5rem; align-items:center; margin:.1rem 0 .9rem;
+              min-height:2.9rem; font-size:1.4rem; flex-wrap:wrap; }
+  .pl-plank .badge { width:2.6rem; height:2.6rem; border-radius:50%; display:flex;
+                     align-items:center; justify-content:center; background:var(--panel);
+                     border:2.5px solid var(--accent); font-size:1.35rem; }
+  .pl-plank .badge.nieuw { animation:popin .55s cubic-bezier(.2,1.6,.4,1); }
+  .pl-plank .leeg-plank { color:var(--dim); font-size:.9rem; font-style:italic; }
+  @keyframes popin { from { transform:scale(0); } }
+  .stap { width:1.5rem; height:1.5rem; border-radius:6px; border:1px solid var(--lijn);
+          background:none; color:var(--ink); cursor:pointer; font-size:.95rem; padding:0;
+          vertical-align:middle; }
+  .pl-kaart .weg { flex:0 0 auto; background:none; border:none; color:var(--dim);
+                   cursor:pointer; font-size:.85rem; opacity:.55; padding:.2rem; }
+  .pl-kaart .weg:hover { color:var(--rood); opacity:1; }
+  .pl-kaart.nieuw { border-style:dashed; color:var(--dim); cursor:pointer; }
+  #plNieuw { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
+             align-items:center; justify-content:center; z-index:80; }
+  #pnKaart { background:var(--panel); border:1px solid var(--lijn); border-radius:16px;
+             padding:1.2rem 1.4rem; width:min(430px,92vw); display:flex;
+             flex-direction:column; gap:.8rem; }
+  #pnEmojis { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .pn-em { font-size:1.4rem; width:2.6rem; height:2.6rem; border-radius:10px;
+           border:2px solid var(--lijn); background:none; cursor:pointer; padding:0; }
+  .pn-em.actief { border-color:var(--accent); background:rgba(127,191,166,.15); }
+  #pnNaam { background:var(--bg); border:1px solid #333a41; border-radius:10px;
+            color:var(--ink); padding:.65rem .8rem; font-size:1.05rem; }
+  .pn-rij { display:flex; align-items:center; gap:.7rem; }
+  .pn-rij button.groot { border:none; border-radius:10px; padding:.6rem 1.2rem;
+                         background:var(--accent); color:#14171a; font-weight:700;
+                         cursor:pointer; font-size:1rem; margin-left:auto; }
   .pl-seg.nu2 { border-color:var(--amber); box-shadow:0 5px 16px rgba(0,0,0,.45);
                 transform:translateY(-3px); }
   .pl-seg.bonus { background:rgba(127,191,166,.16) !important; cursor:default;
@@ -895,6 +919,18 @@ PAGE = """<!doctype html>
 <canvas id="plCanvas"></canvas>
 <div id="plKlaar" onclick="this.style.display='none'">
   <h1>🎉 Goed gedaan! 🎉</h1><p>Alles is af — wat ging dat snel!</p></div>
+<div id="plNieuw" onclick="this.style.display='none'">
+  <div id="pnKaart" onclick="event.stopPropagation()">
+    <h3>➕ Nieuw taakje</h3>
+    <div id="pnEmojis"></div>
+    <input id="pnNaam" placeholder="Hoe heet het taakje?" maxlength="30">
+    <div class="pn-rij"><span>Duur:</span>
+      <button class="stap" onclick="plNieuwMinStap(-1)">−</button>
+      <b id="pnMin"></b>
+      <button class="stap" onclick="plNieuwMinStap(1)">+</button>
+      <button class="groot" onclick="plNieuwToevoegen()">Toevoegen</button></div>
+  </div>
+</div>
 <div id="l2" onclick="sluitL2()">
   <div id="l2kaart" onclick="event.stopPropagation()">
     <div id="l2kop"><h3 id="l2Titel"></h3><button onclick="sluitL2()" title="Sluiten">✕</button></div>
@@ -1358,6 +1394,62 @@ function plLaad(){
   return s;
 }
 let PLAN = plLaad();
+const EMOJIS = ['🚽','👕','🥣','🪥','🧺','🎒','🧸','🛁','🩳','📖','🧦','🍎','🐕','🎨','✏️','🚲'];
+function takenVan(d){
+  try {
+    const alles = JSON.parse(localStorage.getItem('birdy-plan-taken')) || {};
+    if (Array.isArray(alles[d]) && alles[d].length) return alles[d];
+  } catch(e){}
+  return ROUTINES[d];
+}
+function takenBewaar(d, lijst){
+  let alles = {};
+  try { alles = JSON.parse(localStorage.getItem('birdy-plan-taken')) || {}; } catch(e){}
+  alles[d] = lijst;
+  try { localStorage.setItem('birdy-plan-taken', JSON.stringify(alles)); } catch(e){}
+}
+function taakTijd(i, delta){
+  const lijst = takenVan(PLAN.dagdeel).map(t => ({ ...t }));
+  lijst[i].m = Math.max(1, Math.min(60, lijst[i].m + delta));
+  takenBewaar(PLAN.dagdeel, lijst); renderPlan();
+}
+function taakWeg(i){
+  const lijst = takenVan(PLAN.dagdeel).map(t => ({ ...t }));
+  lijst.splice(i, 1);
+  PLAN.gekozen = PLAN.gekozen.filter(g => g !== i).map(g => g > i ? g - 1 : g);
+  takenBewaar(PLAN.dagdeel, lijst); plBewaar(); renderPlan();
+}
+function takenHerstel(){
+  let alles = {};
+  try { alles = JSON.parse(localStorage.getItem('birdy-plan-taken')) || {}; } catch(e){}
+  delete alles[PLAN.dagdeel];
+  try { localStorage.setItem('birdy-plan-taken', JSON.stringify(alles)); } catch(e){}
+  PLAN.gekozen = []; plBewaar(); renderPlan();
+}
+let plNieuwEmoji = EMOJIS[0], plNieuwMin = 5;
+function plNieuwOpen(){
+  plNieuwEmoji = EMOJIS[0]; plNieuwMin = 5;
+  document.getElementById('pnNaam').value = '';
+  plNieuwTeken();
+  document.getElementById('plNieuw').style.display = 'flex';
+  document.getElementById('pnNaam').focus();
+}
+function plNieuwTeken(){
+  document.getElementById('pnEmojis').innerHTML = EMOJIS.map(e =>
+    `<button class="pn-em${e === plNieuwEmoji ? ' actief' : ''}"
+       onclick="plNieuwEmoji='${e}';plNieuwTeken()">${e}</button>`).join('');
+  document.getElementById('pnMin').textContent = plNieuwMin + ' min';
+}
+function plNieuwMinStap(d){ plNieuwMin = Math.max(1, Math.min(60, plNieuwMin + d)); plNieuwTeken(); }
+function plNieuwToevoegen(){
+  const naam = document.getElementById('pnNaam').value.trim();
+  if (!naam){ toon('Geef het taakje een naam!'); return; }
+  const lijst = takenVan(PLAN.dagdeel).map(t => ({ ...t }));
+  lijst.push({ e: plNieuwEmoji, n: naam.slice(0, 30), m: plNieuwMin });
+  takenBewaar(PLAN.dagdeel, lijst);
+  document.getElementById('plNieuw').style.display = 'none';
+  renderPlan();
+}
 let plWaarsch = null, plWaarschVertrek = false;
 function plBewaar(){ try { localStorage.setItem('birdy-plan', JSON.stringify(PLAN)); } catch(e){} }
 function plDagdeel(d){ PLAN = plLeeg(d); PLAN.dagdeel = d;
@@ -1385,7 +1477,7 @@ function plActiefStart(){
   return PLAN.af.length ? PLAN.af[PLAN.af.length - 1].t : PLAN.start;
 }
 function bonusMinuten(){
-  const r = ROUTINES[PLAN.dagdeel];
+  const r = takenVan(PLAN.dagdeel);
   const klaarPlanned = PLAN.af.reduce((som, a) => som + r[a.i].m, 0);
   const alles = PLAN.af.length === PLAN.gekozen.length;
   const eind = alles && PLAN.af.length
@@ -1396,7 +1488,7 @@ function bonusMinuten(){
 function renderPlan(){
   const el = document.getElementById('paneelPlan');
   el.classList.toggle('breed', !!PLAN.start && PLAN.versie === 'balk');
-  const r = ROUTINES[PLAN.dagdeel];
+  const r = takenVan(PLAN.dagdeel);
   const kop = `<div class="pl-kop"><h2>${PLAN.dagdeel === 'ochtend' ? '🌞 Goedemorgen!' : '🌙 Avondprogramma'}</h2>
     <div class="pl-versie">
       <button class="${PLAN.versie==='kaart'?'actief':''}" onclick="plVersie('kaart')">Kaartjes</button>
@@ -1415,6 +1507,7 @@ function renderPlan(){
 }
 // ── opzet: placeholders links, voorraad rechts ──
 function renderOpzet(el, r, kop){
+  PLAN.gekozen = PLAN.gekozen.filter(g => g < r.length);
   const slots = PLAN.gekozen.map((i, s) =>
     `<li class="pl-slot vol" data-s="${s}"><div class="pl-kaart mini" onclick="plWeg(${s})"
       title="tik om terug te leggen">${plKaartHtml(r[i])}</div></li>`)
@@ -1423,19 +1516,29 @@ function renderOpzet(el, r, kop){
   const bak = r.map((t, i) => PLAN.gekozen.includes(i) ? '' :
     `<li class="pl-kaart mini sleepbaar" data-i="${i}"
        onpointerdown="plPak(event,${i})" onpointermove="plSleepMove(event)"
-       onpointerup="plLos(event)" onpointercancel="plLos(event)">${plKaartHtml(t)}</li>`).join('');
+       onpointerup="plLos(event)" onpointercancel="plLos(event)">
+       <span class="em">${t.e}</span><span class="naam">${t.n}</span>
+       <span class="tijd"><button class="stap" onpointerdown="event.stopPropagation()"
+         onclick="event.stopPropagation();taakTijd(${i},-1)">−</button> ${t.m}m
+         <button class="stap" onpointerdown="event.stopPropagation()"
+         onclick="event.stopPropagation();taakTijd(${i},1)">+</button></span>
+       <button class="weg" title="taakje weghalen" onpointerdown="event.stopPropagation()"
+         onclick="event.stopPropagation();taakWeg(${i})">✕</button></li>`).join('');
   el.innerHTML = kop +
     `<p class="pl-hint">Sleep de taken die je gaat doen naar links, in jouw volgorde.
       Wat je niet hoeft, laat je gewoon staan!</p>` +
     `<div class="pl-opzet">
       <div><div class="pl-kolomkop">📋 Mijn plan</div><ul class="pl-slots" id="plSlots">${slots.join('')}</ul></div>
-      <div><div class="pl-kolomkop">🧺 Taken</div><ul class="pl-bak">${bak}</ul></div>
+      <div><div class="pl-kolomkop">🧺 Taken</div><ul class="pl-bak">${bak}
+        <li class="pl-kaart mini nieuw" onclick="plNieuwOpen()">
+          <span class="em">➕</span><span class="naam">Nieuw taakje…</span></li></ul></div>
     </div>` +
     `<div class="pl-tijd-rij"><span>${PLAN.dagdeel === 'ochtend' ? '🕗 We vertrekken om' : '🕢 Bedtijd om'}</span>
       <input type="time" id="plVertrek" value="${PLAN.vertrek}">
       <span>· daarna: ${BONUS.e} ${BONUS.n.toLowerCase()} (${BONUS.basis} min + bonus!)</span></div>` +
     `<button class="pl-start" onclick="plStart()">Start! ▶</button>` +
-    (PLAN.gekozen.length ? `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>` : '');
+    `<button class="pl-reset" onclick="plReset()">opnieuw beginnen</button>
+     <button class="pl-reset" onclick="takenHerstel()">standaardtaken herstellen</button>`;
 }
 function plWeg(s){ PLAN.gekozen.splice(s, 1); plBewaar(); renderPlan(); }
 let plPakData = null;
@@ -1487,7 +1590,7 @@ function renderKaarten(el, r, kop){
 // ── weergave 2: tijdlijn met vertrektijd ──
 function hmNaarMin(hm){ const d = hm.split(':'); return (+d[0]) * 60 + (+d[1]); }
 function balkModel(){
-  const r = ROUTINES[PLAN.dagdeel];
+  const r = takenVan(PLAN.dagdeel);
   const startD = new Date(PLAN.start);
   const startMin = startD.getHours() * 60 + startD.getMinutes() + startD.getSeconds() / 60;
   const somPlanned = PLAN.gekozen.reduce((s, i) => s + r[i].m, 0);
@@ -1515,10 +1618,12 @@ function renderBalk(el, r, kop){
   el.innerHTML = kop +
     `<p class="pl-hint">De rode stip is de klok — blijf hem voor! Alles wat je overhoudt is
       ${BONUS.e} bonustijd. Klaar met een taak? Tik erop!</p>` +
-    `<div class="pl-balkwrap"><div class="pl-balk2" id="plBalk2">` +
-    (PLAN.af.length ? `<div class="pl-stapel" title="al gedaan!">
-       <span>✓ ${PLAN.af.length}</span>
-       <span class="ems">${PLAN.af.map(a => r[a.i].e).join('')}</span></div>` : '') +
+    `<div class="pl-plank">🏆` +
+      (PLAN.af.length
+        ? PLAN.af.map((a, k) => `<span class="badge${k === PLAN.af.length - 1 ? ' nieuw' : ''}"
+            style="border-color:${KLEUREN[a.i % KLEUREN.length]}">${r[a.i].e}</span>`).join('')
+        : `<span class="leeg-plank">hier komen jouw medailles!</span>`) +
+    `</div><div class="pl-balkwrap"><div class="pl-balk2" id="plBalk2">` +
     m.segs.filter(s => !s.af).map(s => s.bonus
       ? `<div class="pl-seg bonus" id="plSegBonus" style="flex:${s.breed} 1 0">
            <span class="em2">${BONUS.e}</span><span id="plBonus"></span></div>`
@@ -1562,7 +1667,7 @@ function renderSterren(el, r, kop){
 }
 function plTick(){
   if (!PLAN.start || document.getElementById('paneelPlan').style.display === 'none') return;
-  const r = ROUTINES[PLAN.dagdeel];
+  const r = takenVan(PLAN.dagdeel);
   const bonus = bonusMinuten();
   const bonusEl = document.getElementById('plBonus');
   const actief = plActief();
@@ -1622,7 +1727,7 @@ setInterval(plTick, 1000);
 function plVier(ev, i){
   if (PLAN.af.some(a => a.i === i)) return;
   if (i !== plActief()) return;  // altijd in de gekozen volgorde
-  const r = ROUTINES[PLAN.dagdeel];
+  const r = takenVan(PLAN.dagdeel);
   const gebruikt = (Date.now() - plActiefStart()) / 60000;
   const verdiend = Math.round(r[i].m - gebruikt);
   PLAN.af.push({ i, t: Date.now() }); plBewaar();
