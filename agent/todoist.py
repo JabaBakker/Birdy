@@ -99,6 +99,8 @@ def cmd_list(lijst: str | None) -> None:
     for t in tasks:
         due = (t.get("due") or {}).get("string", "")
         print(f"- {t['content']}" + (f"  · {due}" if due else ""))
+        if t.get("description"):
+            print(f"    ↳ notitie: {t['description']}")
 
 
 def cmd_done(query: str, lijst: str | None) -> None:
@@ -115,6 +117,20 @@ def cmd_done(query: str, lijst: str | None) -> None:
     print(f"Afgevinkt: {matches[0]['content']}")
 
 
+def cmd_notitie(query: str, lijst: str | None, tekst: str) -> None:
+    params = {"project_id": _project(lijst)["id"]} if lijst else None
+    tasks = _list_all("/tasks", params)
+    wanted = query.strip().lower()
+    matches = [t for t in tasks if wanted in t["content"].lower()]
+    if not matches:
+        sys.exit(f"Geen open taak gevonden die op '{query}' lijkt.")
+    if len(matches) > 1:
+        opts = "; ".join(t["content"] for t in matches[:5])
+        sys.exit(f"Meerdere taken lijken op '{query}': {opts}. Wees specifieker.")
+    _request("POST", f"/tasks/{matches[0]['id']}", json={"description": tekst})
+    print(f"Notitie opgeslagen bij: {matches[0]['content']}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -127,6 +143,10 @@ def main() -> None:
     pd = sub.add_parser("done")
     pd.add_argument("query")
     pd.add_argument("--lijst")
+    pn = sub.add_parser("notitie")
+    pn.add_argument("query")
+    pn.add_argument("--lijst")
+    pn.add_argument("--tekst", required=True, help="de notitie (vervangt de bestaande)")
     sub.add_parser("projects")
     args = p.parse_args()
 
@@ -136,6 +156,8 @@ def main() -> None:
         cmd_list(args.lijst)
     elif args.cmd == "done":
         cmd_done(args.query, args.lijst)
+    elif args.cmd == "notitie":
+        cmd_notitie(args.query, args.lijst, args.tekst)
     else:
         cmd_projects()
 

@@ -109,6 +109,14 @@ Boodschappen en losse acties staan in Todoist (zichtbaar op ieders telefoon):
 - Met moment: `python /app/agent/todoist.py add "band plakken" --lijst acties --wanneer "zaterdag"`
 - Tonen: `python /app/agent/todoist.py list --lijst boodschappen` · Afvinken: `... done "kwark" --lijst boodschappen`
 
+**Vraag over één taak**: begint een bericht met `Over de actie "X":` of
+`Over de boodschap "X":` (dat stuurt het dashboard), beantwoord dan die vraag kort —
+uitzoekwerk (cadeau-ideeën, opties, prijzen) mag — en bewaar de kern van je antwoord
+als notitie bij die taak, zodat hij op het dashboard en in Todoist blijft staan:
+`python /app/agent/todoist.py notitie "X" --lijst acties --tekst "..."`.
+De notitie vervangt de bestaande (die zie je in de list-uitvoer als `↳ notitie:`) —
+neem waardevolle bestaande notitietekst dus mee in de nieuwe.
+
 Regels: alles wat klinkt als een boodschap ("voeg kwark toe", "melk is op") gaat direct
 naar de lijst **boodschappen** — geen voorstel nodig, gewoon doen en kort bevestigen.
 Kleine, concrete acties — één handeling, in één keer af te vinken ("bandje plakken",

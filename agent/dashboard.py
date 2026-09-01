@@ -171,6 +171,7 @@ def _todoist_lijst(naam: str) -> list[dict]:
             "id": str(t["id"]),
             "tekst": t["content"],
             "due": ((t.get("due") or {}).get("date") or "")[:10],
+            "notitie": (t.get("description") or "")[:400],
         } for t in tasks]
         out.sort(key=lambda t: (t["due"] == "", t["due"]))  # deadlines eerst, oplopend
         return out[:50]  # de Vandaag-tab toont de top; de verdiepende pagina alles
@@ -694,7 +695,18 @@ PAGE = """<!doctype html>
   #l2 { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
         align-items:center; justify-content:center; z-index:65; }
   #l2kaart { background:var(--panel); border:1px solid var(--lijn); border-radius:16px;
-             padding:1.1rem 1.3rem; width:min(560px,94vw); max-height:86vh; overflow-y:auto; }
+             padding:1.1rem 1.4rem; width:min(920px,96vw); max-height:88vh; overflow-y:auto; }
+  .fchips { display:flex; gap:.4rem; flex-wrap:wrap; margin:.7rem 0 .5rem; }
+  .fchip { border:1px solid var(--lijn); background:none; color:var(--dim); border-radius:99px;
+           padding:.28rem .85rem; font-size:.85rem; cursor:pointer; text-transform:capitalize; }
+  .fchip.actief { background:var(--accent); color:#14171a; border-color:var(--accent);
+                  font-weight:600; }
+  .sectiegrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+                gap:0 1.6rem; }
+  .vraagknop { flex:0 0 auto; align-self:center; border:1px solid #3a4148; background:none;
+               border-radius:8px; padding:.15rem .5rem; cursor:pointer; font-size:.85rem;
+               opacity:.75; }
+  .vraagknop:hover, .vraagknop:active { border-color:var(--accent); opacity:1; }
   #l2kop { display:flex; align-items:baseline; }
   #l2kop h3 { font-size:1.1rem; }
   #l2kop button { margin-left:auto; background:none; border:none; color:var(--dim);
@@ -832,10 +844,43 @@ function jarigRij(j){
 }
 
 // ── verdiepende pagina's (L2) ─────────────────────────────────────────────
-let DATA = null, L2open = null;
-function openL2(naam){ L2open = naam;
+let DATA = null, L2open = null, L2filter = 'alle';
+function openL2(naam){ L2open = naam; L2filter = 'alle';
   document.getElementById('l2').style.display = 'flex'; renderL2(); }
 function sluitL2(){ L2open = null; document.getElementById('l2').style.display = 'none'; }
+function zetFilter(f){ L2filter = f; renderL2(); }
+function filterChips(){
+  const namen = ['alle', ...PERSONEN, 'overig'];
+  return `<div class="fchips">` + namen.map(n =>
+    `<button class="fchip${L2filter === n ? ' actief' : ''}"` +
+    ` onclick="zetFilter('${n}')">${esc(n)}</button>`).join('') + `</div>`;
+}
+function filterItems(items, tekstVan){
+  if (L2filter === 'alle') return items;
+  return items.filter(x => {
+    const p = persoonMatch(tekstVan(x));
+    return L2filter === 'overig' ? !p : (p && p.naam === L2filter);
+  });
+}
+function taakRijL2(x){
+  const p = persoonMatch(x.tekst);
+  return `<li class="vink"${p ? ` style="--pc:${p.kleur}"` : ''} onclick="vink(this,'${x.id}')">` +
+    `<span>${esc(x.tekst)}${dueBadge(x.due)}` +
+    (x.notitie ? `<br><span class="notitie">${esc(x.notitie)}</span>` : '') + `</span>` +
+    `<button class="vraagknop" title="vraag Birdy hierover"` +
+    ` onclick="event.stopPropagation();vraagOver('${L2open}','${x.id}')">💬</button>` +
+    (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
+      ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
+}
+function vraagOver(lijst, id){
+  const x = (DATA[lijst] || []).find(t => t.id === id); if (!x) return;
+  sluitL2();
+  chatOpen(true);
+  const veld = document.getElementById('chatveld');
+  veld.value = `Over de ${lijst === 'acties' ? 'actie' : 'boodschap'} "${x.tekst}": `;
+  veld.focus();
+  try { veld.setSelectionRange(veld.value.length, veld.value.length); } catch(e){}
+}
 function renderL2(){
   if (!L2open || !DATA) return;
   document.getElementById('l2Titel').textContent = {
@@ -845,15 +890,20 @@ function renderL2(){
   let html = '';
   if (L2open === 'taken'){
     const secties = DATA.overzicht_vol || [];
-    html = secties.length ? secties.map(s =>
-      `<h4>${esc(s.kop)}</h4><ul>` +
-      s.items.map(x => `<li><span>${esc(x)}${persChip(x)}</span></li>`).join('') + `</ul>`
-    ).join('') : '<p class="leeg">Nog niets — stuur Birdy wat taken!</p>';
+    const zicht = secties.map(s => ({ kop: s.kop, items: filterItems(s.items, x => x) }))
+      .filter(s => s.items.length);
+    html = filterChips() + (zicht.length
+      ? `<div class="sectiegrid">` + zicht.map(s =>
+          `<div><h4>${esc(s.kop)}</h4><ul>` +
+          s.items.map(x => `<li><span>${esc(x)}${persChip(x)}</span></li>`).join('') +
+          `</ul></div>`).join('') + `</div>`
+      : '<p class="leeg">niets gevonden voor dit filter</p>');
   } else if (L2open === 'boodschappen' || L2open === 'acties'){
-    const items = DATA[L2open] || [];
-    html = '<ul>' + (items.length ? items.map(taakRij).join('')
-                                  : '<li class="leeg">niets 🎉</li>') + '</ul>';
-    const af = DATA[L2open + '_af'] || [];
+    const items = filterItems(DATA[L2open] || [], x => x.tekst);
+    html = filterChips() + '<ul>' +
+      (items.length ? items.map(taakRijL2).join('') : '<li class="leeg">niets voor dit filter</li>') +
+      '</ul>';
+    const af = filterItems(DATA[L2open + '_af'] || [], x => x.tekst);
     if (af.length) html += '<h4>↩ Onlangs afgevinkt</h4><ul>' + af.map(afRij).join('') + '</ul>';
   } else if (L2open === 'verjaardagen'){
     const items = DATA.verjaardagen || [];
