@@ -14,7 +14,9 @@ Weekplanning (zondagavond) — {now}
    verdeling). Ruim op: verplaats onderwerpen naar de juiste secties voor de komende
    week, archiveer ✅-regels ouder dan twee weken, en werk `OVERZICHT.md` én het Doc
    "Wat loopt er" bij (Afgerond-sectie: alleen de laatste ±5).
-2. Schrijf het weekbericht voor de gezinschat, maximaal ~15 regels:
+2. Schrijf `AANDACHT.md` (format in je instructies): maximaal drie punten die komende
+   week écht aandacht verdienen, elk één concrete zin met naam. Het dashboard toont ze.
+3. Schrijf het weekbericht voor de gezinschat, maximaal ~15 regels:
 
 📅 De week vooruit (DD-MM t/m DD-MM)
 • Per dag alleen de dagen waarop iets moet: agenda-afspraken én taken, met eigenaar

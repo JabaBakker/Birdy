@@ -224,7 +224,11 @@ def _aandacht_birdy(workspace: Path) -> dict:
             continue
         if s.startswith(("•", "-", "*")):
             items.append(s.lstrip("•-* ").strip()[:200])
-    return {"tijd": tijd, "items": items[:3]}
+    # ouder dan 3 dagen → niet meer tonen (Birdy schrijft ze bij de weekplanning of op verzoek)
+    dagen = _datum_dagen(tijd) if tijd else None
+    if dagen is not None and dagen < -3:
+        return {"tijd": tijd, "items": [], "oud": True}
+    return {"tijd": tijd, "items": items[:3], "oud": False}
 
 
 def _signalen(acties: list[dict], regelzaken: list[dict], verjaardagen: list[dict],
@@ -1523,9 +1527,10 @@ function renderL2(){
     const a = DATA.aandacht || { birdy: { items: [] }, signalen: [] };
     const b = a.birdy || { items: [] };
     html = `<h4><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"> Wat Birdy opviel` +
-      (b.tijd ? ` <span class="notitie">· briefing van ${esc(b.tijd)}</span>` : '') + '</h4><ul>' +
+      (b.tijd && b.items.length ? ` <span class="notitie">· ${esc(b.tijd)}</span>` : '') + '</h4><ul>' +
       (b.items.length ? b.items.map(x => `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`).join('')
-        : '<li class="leeg">nog niets — komt bij de volgende ochtendbriefing</li>') + '</ul>';
+        : `<li class="leeg">${b.oud ? 'de vorige punten zijn ouder dan drie dagen' : 'nog niets'} — vraag Birdy hieronder om een verse blik, of wacht op de weekplanning van zondag</li>`) + '</ul>';
+    html += `<button class="vraagknop" style="margin:.2rem 0 .9rem" onclick="sluitL2(); stuur('Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties, onderwerpen en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.')">🐦 Vraag Birdy om een verse blik</button>`;
     html += '<h4>Signalen uit agenda, acties en handboek</h4><ul>' +
       ((a.signalen || []).length ? a.signalen.map(signaalRij).join('') : '<li class="leeg">niets dat aandacht vraagt 🙂</li>') + '</ul>';
   } else if (L2open === 'boodschappen' || L2open === 'acties'){

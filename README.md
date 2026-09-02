@@ -89,7 +89,8 @@ Werkt zoals voorheen: bot via @BotFather (`/setprivacy` → Disable), token in
 - Alles wat in je hoofd zit → #birdy in. Tekst, foto of pdf (lijstje, schoolbrief).
 - Documenten: Birdy stelt voor (wat, waarheen, welke agenda-items) → 👍 → gearchiveerd.
 - "voeg X toe aan de boodschappen" → staat op ieders telefoon in Todoist.
-- 07:15 — ochtendbriefing in #briefing; zondag 19:30 — weekplanning. Uitzoekwerk doet
+- Zondag 19:30 — weekplanning in #briefing (de ochtendbriefing staat uit: het dashboard
+  toont alles al; aanzetten = tijd in AGENT_DIGEST_TIME). Uitzoekwerk doet
   Birdy op verzoek ("zoek eens uit …"); het dagelijkse eigen-initiatief-moment staat uit
   (AGENT_PROACTIVE_TIME leeg; vul een tijd in om het aan te zetten).
 - "die is klaar" / "verzet dat naar vrijdag" — gewoon zeggen, Birdy werkt het bij.
