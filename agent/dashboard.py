@@ -817,7 +817,8 @@ PAGE = """<!doctype html>
   /* aandacht: Birdy's eigen punten herkenbaar (vogeltje + warme tint), regels gewoon */
   li.birdy { background:rgba(217,164,78,.11); border-left:3px solid var(--amber); border-radius:8px;
              padding:.38rem .55rem; margin:.12rem 0; align-items:flex-start; }
-  li.birdy img.bird { width:1.15rem; height:1.15rem; flex:0 0 auto; margin-top:.1rem; }
+  img.bird { width:1.15rem; height:1.15rem; flex:0 0 auto; vertical-align:-.2rem; }
+  li.birdy img.bird { margin-top:.1rem; }
   li.signaal { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.28rem .4rem; }
   li.signaal:active { background:rgba(127,191,166,.12); }
   li.signaal.ernst0 span::before { content:"● "; color:var(--rood); }
