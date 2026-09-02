@@ -264,11 +264,7 @@ def _signalen(acties: list[dict], regelzaken: list[dict], verjaardagen: list[dic
         out.append({"tekst": f"{n} actie{'s' if n > 1 else ''} over de datum: "
                              + ", ".join(a["tekst"][:28] for a in te_laat[:2])
                              + (" …" if n > 2 else ""), "l2": "acties", "ernst": 0})
-    vandaag_acties = [a for a in acties if a.get("due") == vandaag_s]
-    if vandaag_acties:
-        n = len(vandaag_acties)
-        out.append({"tekst": f"Vandaag: {', '.join(a['tekst'][:28] for a in vandaag_acties[:3])}"
-                             + (f" (+{n - 3})" if n > 3 else ""), "l2": "acties", "ernst": 0})
+    # acties van vandaag niet apart melden: die staan al onder "Nu" in de actiekolom
 
     for o in onderwerpen:
         if o["dagen"] is not None and o["dagen"] <= 1:

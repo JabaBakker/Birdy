@@ -274,7 +274,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             vandaag=vandaag)
         teksten = [s["tekst"] for s in sig]
         self.assertTrue(any(t.startswith("1 actie over de datum") for t in teksten))
-        self.assertIn("Vandaag: cadeau Avie", teksten)
+        self.assertFalse(any(t.startswith("Vandaag:") for t in teksten))  # staat al in de actiekolom
         self.assertIn("📂 Kinderfeest: vandaag — gastenlijst", teksten)
         self.assertIn("🔁 Kapper Evi is 3 dagen over tijd (Jaap)", teksten)
         self.assertIn("🎂 Avie morgen, nog geen cadeau-idee", teksten)
