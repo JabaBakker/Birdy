@@ -480,6 +480,40 @@ def _agenda_bewerk(event_id: str, velden: dict) -> bool:
         return False
 
 
+def _agenda_nieuw(velden: dict) -> dict | None:
+    """Nieuwe Google-afspraak; geeft {id, start, eind} terug of None."""
+    from . import gcal
+
+    s, e = velden["start"], velden["eind"]
+    if "T" in s:
+        start = {"dateTime": f"{s}:00", "timeZone": "Europe/Amsterdam"}
+        eind = {"dateTime": f"{e}:00", "timeZone": "Europe/Amsterdam"}
+    else:
+        start = {"date": s}
+        eind = {"date": (date.fromisoformat(e) + timedelta(days=1)).isoformat() if e == s else e}
+    body = {"summary": velden["titel"], "start": start, "end": eind,
+            "location": velden.get("locatie", ""), "description": velden.get("omschrijving", "")}
+    try:
+        svc = gcal._service()
+        ev = svc.events().insert(calendarId=os.environ["GOOGLE_CALENDAR_ID"], body=body).execute()
+        return {"id": ev.get("id", ""), "start": s, "eind": e}
+    except BaseException:
+        log.warning("afspraak aanmaken mislukt", exc_info=True)
+        return None
+
+
+def _agenda_verwijder(event_id: str) -> bool:
+    from . import gcal
+
+    try:
+        svc = gcal._service()
+        svc.events().delete(calendarId=os.environ["GOOGLE_CALENDAR_ID"], eventId=event_id).execute()
+        return True
+    except BaseException:
+        log.warning("afspraak verwijderen mislukt", exc_info=True)
+        return False
+
+
 def _regelzaken() -> list[dict]:
     """Terugkerende regelzaken uit het huishoudhandboek (Google Doc), gesorteerd op
     'volgende'-datum. Regelformat: • Kapper Evi — wie: Yvette · elke: ~8 weken ·
@@ -813,8 +847,18 @@ class Dashboard:
         except Exception:
             body = {}
         event_id = str(body.get("id", "")).strip()
-        if not event_id or len(event_id) > 200:
+        actie = str(body.get("actie", "")).strip()  # '' = bewerken, 'nieuw', 'verwijder'
+        if actie != "nieuw" and (not event_id or len(event_id) > 200):
             return web.json_response({"error": "geen afspraak-id"}, status=400)
+        if actie == "verwijder":
+            ok = await asyncio.to_thread(_agenda_verwijder, event_id)
+            if ok:
+                self._gen += 1
+                self._cache = None
+                self._agenda_cache = {}
+                if self._traag:
+                    self._traag["week"] = [e for e in self._traag["week"] if e.get("id") != event_id]
+            return web.json_response({"ok": ok}, status=200 if ok else 502)
 
         def is_dag(t: str) -> bool:
             return len(t) == 10 and t[4] == t[7] == "-" and t.replace("-", "").isdigit()
@@ -836,6 +880,22 @@ class Dashboard:
         for k in ("locatie", "omschrijving"):
             if k in body:
                 velden[k] = str(body[k]).strip()[:2000 if k == "omschrijving" else 200]
+        if actie == "nieuw":
+            if "titel" not in velden or "start" not in velden:
+                return web.json_response({"error": "titel en datum zijn nodig"}, status=400)
+            nieuw = await asyncio.to_thread(_agenda_nieuw, velden)
+            if nieuw:
+                self._gen += 1
+                self._cache = None
+                self._agenda_cache = {}
+                if self._traag:
+                    self._traag["week"].append({
+                        "id": nieuw["id"], "start": velden["start"], "eind": velden["eind"],
+                        "titel": velden["titel"], "omschrijving": velden.get("omschrijving", "")[:600],
+                        "locatie": velden.get("locatie", ""), "wie": "Birdy", "bron": "Gezinsagenda (Google)"})
+                    self._traag["week"].sort(key=lambda e: e["start"])
+            return web.json_response({"ok": bool(nieuw), "id": (nieuw or {}).get("id", "")},
+                                     status=200 if nieuw else 502)
         if not velden:
             return web.json_response({"error": "niets te wijzigen"}, status=400)
         ok = await asyncio.to_thread(_agenda_bewerk, event_id, velden)
@@ -1004,6 +1064,10 @@ PAGE = """<!doctype html>
                 font-size:.74rem; font-weight:600; }
   .kaartkop b:empty { display:none; }
   .kaartkop i { margin-left:auto; color:var(--dim); font-style:normal; font-size:1.1rem; }
+  .kaartkop .kopknop { margin-left:auto; border:1px solid var(--lijn); background:rgba(255,255,255,.05);
+                       color:var(--accent); border-radius:8px; width:1.7rem; height:1.7rem; cursor:pointer;
+                       font-size:1.05rem; line-height:1; padding:0; }
+  .kaartkop .kopknop + i { margin-left:0; }
   .panel ul { list-style:none; padding:0; }
   .panel li { padding:.24rem 0; font-size:.95rem; line-height:1.35; display:flex; gap:.5rem;
               align-items:baseline; }
@@ -1458,7 +1522,7 @@ PAGE = """<!doctype html>
         <div class="kaartkop"><span class="ico">🏠</span><h3>Thuis</h3><i>›</i></div><ul id="mtList"></ul></div>
     </aside>
     <div class="hoofd">
-      <div class="panel"><div class="kaartkop" onclick="kiesTab('week')" title="Naar weekoverzicht"><span class="ico">📅</span><h2>Agenda</h2><i>⤢</i></div><ul id="agenda" class="tl scroll"></ul></div>
+      <div class="panel"><div class="kaartkop" onclick="kiesTab('week')" title="Naar weekoverzicht"><span class="ico">📅</span><h2>Agenda</h2><button class="kopknop" title="afspraak toevoegen" onclick="event.stopPropagation();nieuwEv()">＋</button><i>⤢</i></div><ul id="agenda" class="tl scroll"></ul></div>
       <div class="panel aandacht"><div class="kaartkop" onclick="openL2('aandacht')"><span class="ico">💡</span><h2>Aandacht</h2><b id="aaCount"></b><i>⤢</i></div><div id="aandacht" class="scroll"></div><div class="rest" id="aandachtrest"></div></div>
       <div class="panel"><div class="kaartkop" onclick="openL2('acties')"><span class="ico">⚡</span><h2>Acties</h2><i>⤢</i></div>
         <div class="ringwrap"><svg class="ring" viewBox="0 0 60 60"><circle class="spoor" cx="30" cy="30" r="25"/><circle class="vol" id="ringVol" cx="30" cy="30" r="25"/><text x="30" y="35" id="ringGetal">0</text></svg><div class="ringtekst" id="ringTekst"></div></div>
@@ -2180,6 +2244,16 @@ function detailEv(i){
     `<button onclick="document.getElementById('detail').style.display='none'">Sluiten</button>`;
   document.getElementById('detail').style.display = 'flex';
 }
+function nieuwEv(){
+  // leeg formulier: vandaag, eerstvolgende hele uur, één uur lang
+  const nu = new Date(); const u = Math.min(22, nu.getHours() + 1);
+  const p = n => String(n).padStart(2, '0');
+  const dag = isoDag(nu);
+  WEEK.push({ id: '', _nieuw: true, start: `${dag}T${p(u)}:00`, eind: `${dag}T${p(Math.min(23, u + 1))}:00`,
+              titel: '', locatie: '', omschrijving: '', bron: 'Gezinsagenda (Google)', wie: '' });
+  document.getElementById('detail').style.display = 'flex';
+  bewerkEv(WEEK.length - 1);
+}
 function bewerkEv(i){
   const e = WEEK[i]; if (!e) return;
   const heleDag = e.start.length <= 10;
@@ -2187,7 +2261,7 @@ function bewerkEv(i){
   const eindDag = (e.eind || e.start).slice(0,10);
   const s = heleDag ? '09:00' : e.start.slice(11,16);
   const t = heleDag ? '10:00' : (e.eind && e.eind.length > 10 ? e.eind.slice(11,16) : s);
-  document.getElementById('dTitel').textContent = 'Afspraak bewerken';
+  document.getElementById('dTitel').textContent = e._nieuw ? 'Nieuwe afspraak' : 'Afspraak bewerken';
   document.getElementById('dRegels').innerHTML = `<div class="bewerk">
     <label>Titel</label><input id="bwTitel" value="${esc(e.titel)}" maxlength="200">
     <label>Datum</label><div class="tijden"><input type="date" id="bwDag" value="${dag}">
@@ -2199,7 +2273,9 @@ function bewerkEv(i){
   </div>`;
   document.getElementById('dKnoppen').innerHTML =
     `<button class="primair" onclick="bewaarEv(${i}, ${heleDag && eindDag !== dag ? `'${eindDag}'` : 'null'})">Opslaan</button>` +
-    `<button onclick="detailEv(${i})">Annuleren</button>`;
+    (e._nieuw ? `<button onclick="WEEK.splice(${i},1);document.getElementById('detail').style.display='none'">Annuleren</button>`
+              : `<button onclick="detailEv(${i})">Annuleren</button>` +
+                `<button style="margin-left:auto;color:var(--rood)" onclick="verwijderEv(${i})">🗑 Verwijderen</button>`);
   setTimeout(() => document.getElementById('bwTitel').focus(), 50);
 }
 async function bewaarEv(i, meerdaagsEind){
@@ -2218,7 +2294,7 @@ async function bewaarEv(i, meerdaagsEind){
     if (eind <= start) { toon('De eindtijd moet na de begintijd liggen.'); return; }
   }
   if (!titel || !dag) { toon('Titel en datum zijn nodig.'); return; }
-  const body = { id: e.id, titel, start, eind,
+  const body = { id: e.id, titel, start, eind, actie: e._nieuw ? 'nieuw' : '',
     locatie: document.getElementById('bwLocatie').value.trim(),
     omschrijving: document.getElementById('bwOmschr').value.trim() };
   const knop = document.querySelector('#dKnoppen .primair'); if (knop){ knop.disabled = true; knop.textContent = '… opslaan'; }
@@ -2228,9 +2304,23 @@ async function bewaarEv(i, meerdaagsEind){
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'fout');
     Object.assign(e, { titel, start, eind, locatie: body.locatie, omschrijving: body.omschrijving });
+    if (e._nieuw){ e.id = d.id || ''; delete e._nieuw; WEEK.sort((a, b) => a.start < b.start ? -1 : 1); i = WEEK.indexOf(e); }
     renderWeek(WEEK); detailEv(i);
-    toon(`📅 “${titel}” bijgewerkt`); ververs();
+    toon(`📅 “${titel}” ${body.actie === 'nieuw' ? 'toegevoegd' : 'bijgewerkt'}`); ververs();
   } catch(err){ toon('Opslaan lukte even niet: ' + err.message); if (knop){ knop.disabled = false; knop.textContent = 'Opslaan'; } }
+}
+async function verwijderEv(i){
+  const e = WEEK[i]; if (!e || !e.id) return;
+  if (!confirm(`“${e.titel}” uit de gezinsagenda verwijderen?`)) return;
+  try {
+    const r = await fetch('/api/event', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ id: e.id, actie: 'verwijder' }) });
+    if (!r.ok) throw new Error();
+    WEEK.splice(i, 1); renderWeek(WEEK);
+    document.getElementById('detail').style.display = 'none';
+    toon(`🗑 “${e.titel}” verwijderd`); ververs();
+  } catch(err){ toon('Verwijderen lukte even niet — probeer nog eens.'); }
 }
 
 async function ververs(){

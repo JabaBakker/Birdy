@@ -210,6 +210,12 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                                   json={"id": "abc", "titel": "Tandarts", "start": "2026-09-10T10:00", "eind": "2026-09-10T10:30"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 502)  # geen Google in de test
+                async with s.post("http://127.0.0.1:18811/api/event", json={"actie": "nieuw", "titel": "X"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # nieuw zonder datum
+                async with s.post("http://127.0.0.1:18811/api/event", json={"actie": "verwijder"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # verwijderen zonder id
                 async with s.post("http://127.0.0.1:18811/api/message",
                                   json={"text": "voeg kwark toe"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
