@@ -1109,6 +1109,18 @@ PAGE = """<!doctype html>
     .zijbalk { flex-direction:row; overflow-x:auto; }
     .mini { min-width:190px; flex:0 0 auto; }
   }
+  /* bord-modus: Vandaag past altijd op één scherm; lange lijsten scrollen binnen hun kaart */
+  @media (min-width:761px){
+    #paneelVandaag.lay { height:calc(100dvh - var(--kop, 6.5rem)); grid-template-rows:minmax(0, 1fr);
+                         align-items:stretch; }
+    .zijbalk { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding-right:.15rem; }
+    .hoofd { min-height:0; grid-template-rows:minmax(0, 1fr); align-items:stretch; }
+    .hoofd .panel { display:flex; flex-direction:column; min-height:0; max-height:100%; }
+    .hoofd .panel .scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+                            padding-right:.15rem; }
+    .scroll::-webkit-scrollbar, .zijbalk::-webkit-scrollbar { width:5px; }
+    .scroll::-webkit-scrollbar-thumb, .zijbalk::-webkit-scrollbar-thumb { background:rgba(255,255,255,.12); border-radius:99px; }
+  }
   /* ── planning (kinderroutine) ── */
   #paneelPlan { display:none; max-width:600px; margin:0 auto; }
   .pl-kop { display:flex; align-items:center; gap:.7rem; margin-bottom:1rem; }
@@ -1347,11 +1359,11 @@ PAGE = """<!doctype html>
         <div class="kaartkop"><span class="ico">🏠</span><h3>Thuis</h3><i>›</i></div><ul id="mtList"></ul></div>
     </aside>
     <div class="hoofd">
-      <div class="panel"><div class="kaartkop" onclick="kiesTab('week')" title="Naar weekoverzicht"><span class="ico">📅</span><h2>Agenda</h2><i>⤢</i></div><ul id="agenda" class="tl"></ul></div>
-      <div class="panel aandacht"><div class="kaartkop" onclick="openL2('aandacht')"><span class="ico">💡</span><h2>Aandacht</h2><b id="aaCount"></b><i>⤢</i></div><div id="aandacht"></div><div class="rest" id="aandachtrest"></div></div>
+      <div class="panel"><div class="kaartkop" onclick="kiesTab('week')" title="Naar weekoverzicht"><span class="ico">📅</span><h2>Agenda</h2><i>⤢</i></div><ul id="agenda" class="tl scroll"></ul></div>
+      <div class="panel aandacht"><div class="kaartkop" onclick="openL2('aandacht')"><span class="ico">💡</span><h2>Aandacht</h2><b id="aaCount"></b><i>⤢</i></div><div id="aandacht" class="scroll"></div><div class="rest" id="aandachtrest"></div></div>
       <div class="panel"><div class="kaartkop" onclick="openL2('acties')"><span class="ico">⚡</span><h2>Acties</h2><i>⤢</i></div>
         <div class="ringwrap"><svg class="ring" viewBox="0 0 60 60"><circle class="spoor" cx="30" cy="30" r="25"/><circle class="vol" id="ringVol" cx="30" cy="30" r="25"/><text x="30" y="35" id="ringGetal">0</text></svg><div class="ringtekst" id="ringTekst"></div></div>
-        <div id="acties"></div>
+        <div id="acties" class="scroll"></div>
         <div class="toevoeg"><input placeholder="+ nieuwe actie…" enterkeyhint="done"
           onkeydown="voegToe(event,'acties',this)"></div>
         <details class="af" id="actiesAfWrap"><summary>onlangs afgevinkt</summary>
@@ -1433,7 +1445,14 @@ if (q) { KEY = q; try { localStorage.setItem('birdy-key', q); } catch (e) {} }
 function zetSleutel(){ KEY = document.getElementById('sleutelveld').value.trim();
   try { localStorage.setItem('birdy-key', KEY); } catch(e){} ververs(); }
 
+function meetKop(){
+  // hoogte van kopregel + paginaranden → de Vandaag-tab vult precies de rest van het scherm
+  const h = document.querySelector('header');
+  if (h) document.documentElement.style.setProperty('--kop', (h.offsetHeight + 52) + 'px');
+}
+window.addEventListener('resize', meetKop);
 function kiesTab(t){
+  meetKop();
   document.getElementById('paneelVandaag').style.display = t === 'vandaag' ? 'grid' : 'none';
   document.getElementById('paneelWeek').style.display = t === 'week' ? 'block' : 'none';
   document.getElementById('paneelPlan').style.display = t === 'plan' ? 'block' : 'none';
@@ -2067,13 +2086,14 @@ async function ververs(){
     // vandaag-agenda: tijdlijn uit dezelfde weekdata (indexen verwijzen naar WEEK voor de detailkaart)
     const wk = (d.week || []).map((e, i) => Object.assign({}, e, { _i: i }));
     const vandaagKey = isoDag(weekStart(0));
-    document.getElementById('agenda').innerHTML = agendaHtml(wk.filter(e => e.start.slice(0,10) >= vandaagKey));
+    document.getElementById('agenda').innerHTML = agendaHtml(wk.filter(e => e.start.slice(0,10) >= vandaagKey), 40);
+    meetKop();
     // aandacht: Birdy's punten en regel-signalen als kaartjes; samen max 4 op het bord
     const a = d.aandacht || { birdy: { items: [] }, signalen: [] };
     const bItems = (a.birdy && a.birdy.items) || [];
     const bTijd = a.birdy && a.birdy.tijd ? a.birdy.tijd.slice(-5) : '';
     const sig = a.signalen || [];
-    const bTonen = bItems.slice(0, 2), sTonen = sig.slice(0, Math.max(1, 4 - bTonen.length));
+    const bTonen = bItems.slice(0, 3), sTonen = sig.slice(0, Math.max(2, 6 - bTonen.length));
     const kaarten = bTonen.map(x => birdyKaart(x, bTijd)).concat(sTonen.map(aandachtKaart));
     document.getElementById('aandacht').innerHTML =
       kaarten.length ? kaarten.join('') : '<p class="leeg">niets dat aandacht vraagt 🙂</p>';
@@ -2090,7 +2110,7 @@ async function ververs(){
           `${o.dagen !== null ? dagenLabel(o.dagen) : esc(o.wanneer || '')}</small></li>`).join('') +
         (mo.length > 3 ? `<li class="meer">… nog ${mo.length - 3}</li>` : '')
       : '<li class="leeg">niets lopends 🎉</li>';
-    document.getElementById('acties').innerHTML = actiesGroepen(d.acties || [], 9);
+    document.getElementById('acties').innerHTML = actiesGroepen(d.acties || [], 40);
     actiesRing((d.acties || []).length, (d.acties_af || []).length);
     const afWrap = document.getElementById('actiesAfWrap');
     afWrap.style.display = (d.acties_af && d.acties_af.length) ? 'block' : 'none';
