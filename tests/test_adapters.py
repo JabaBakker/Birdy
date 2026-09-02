@@ -199,6 +199,17 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                 async with s.get("http://127.0.0.1:18811/api/agenda?zoek=tandarts",
                                  headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 200)
+                async with s.post("http://127.0.0.1:18811/api/event", json={"id": "abc", "titel": ""},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # lege titel
+                async with s.post("http://127.0.0.1:18811/api/event",
+                                  json={"id": "abc", "start": "2026-09-10T10:00", "eind": "2026-09-10"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # tijd en hele dag gemengd
+                async with s.post("http://127.0.0.1:18811/api/event",
+                                  json={"id": "abc", "titel": "Tandarts", "start": "2026-09-10T10:00", "eind": "2026-09-10T10:30"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 502)  # geen Google in de test
                 async with s.post("http://127.0.0.1:18811/api/message",
                                   json={"text": "voeg kwark toe"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:

@@ -451,6 +451,35 @@ def _agenda_verzet(event_id: str, start: str, eind: str) -> bool:
         return False
 
 
+def _agenda_bewerk(event_id: str, velden: dict) -> bool:
+    """Google-afspraak bewerken: titel, start/eind (met tijd 'YYYY-MM-DDTHH:MM' of hele dag
+    'YYYY-MM-DD'), locatie, omschrijving. Alleen meegegeven velden worden aangepast."""
+    from . import gcal
+
+    body: dict = {}
+    if "titel" in velden:
+        body["summary"] = velden["titel"]
+    if "start" in velden:
+        s, e = velden["start"], velden["eind"]
+        if "T" in s:
+            body["start"] = {"dateTime": f"{s}:00", "timeZone": "Europe/Amsterdam"}
+            body["end"] = {"dateTime": f"{e}:00", "timeZone": "Europe/Amsterdam"}
+        else:  # hele dag: Google wil een exclusieve einddatum
+            eind = (date.fromisoformat(e) + timedelta(days=1)).isoformat() if e == s else e
+            body["start"], body["end"] = {"date": s}, {"date": eind}
+    if "locatie" in velden:
+        body["location"] = velden["locatie"]
+    if "omschrijving" in velden:
+        body["description"] = velden["omschrijving"]
+    try:
+        svc = gcal._service()
+        svc.events().patch(calendarId=os.environ["GOOGLE_CALENDAR_ID"], eventId=event_id, body=body).execute()
+        return True
+    except BaseException:
+        log.warning("afspraak bewerken mislukt", exc_info=True)
+        return False
+
+
 def _regelzaken() -> list[dict]:
     """Terugkerende regelzaken uit het huishoudhandboek (Google Doc), gesorteerd op
     'volgende'-datum. Regelformat: • Kapper Evi — wie: Yvette · elke: ~8 weken ·
@@ -573,6 +602,7 @@ class Dashboard:
         app.router.add_post("/api/due", self.due)
         app.router.add_post("/api/reopen", self.reopen)
         app.router.add_post("/api/verzet", self.verzet)
+        app.router.add_post("/api/event", self.event)
         app.router.add_post("/api/homey/lamp", self.homey_lamp)
         app.router.add_get("/logo.png", self.logo)
         app.router.add_get("/logo-bird.png", self.logo)
@@ -772,6 +802,60 @@ class Dashboard:
                     oudste = min(self._agenda_cache, key=lambda k: self._agenda_cache[k][0])
                     del self._agenda_cache[oudste]
         return web.json_response({"events": events, "van": van.isoformat(), "tot": tot.isoformat()})
+
+    async def event(self, request: web.Request) -> web.Response:
+        """Afspraak bewerken vanaf de detailkaart: {id, titel?, start?, eind?, locatie?, omschrijving?}.
+        start/eind samen: beide 'JJJJ-MM-DDTUU:MM' (met tijd) of beide 'JJJJ-MM-DD' (hele dag)."""
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        event_id = str(body.get("id", "")).strip()
+        if not event_id or len(event_id) > 200:
+            return web.json_response({"error": "geen afspraak-id"}, status=400)
+
+        def is_dag(t: str) -> bool:
+            return len(t) == 10 and t[4] == t[7] == "-" and t.replace("-", "").isdigit()
+
+        def is_tijd(t: str) -> bool:
+            return len(t) == 16 and t[10] == "T" and is_dag(t[:10]) and t[11:].replace(":", "").isdigit()
+
+        velden: dict = {}
+        if "titel" in body:
+            titel = str(body["titel"]).strip()[:200]
+            if not titel:
+                return web.json_response({"error": "titel mag niet leeg zijn"}, status=400)
+            velden["titel"] = titel
+        if "start" in body or "eind" in body:
+            start, eind = str(body.get("start", "")).strip(), str(body.get("eind", "")).strip()
+            if not ((is_tijd(start) and is_tijd(eind)) or (is_dag(start) and is_dag(eind))) or eind < start:
+                return web.json_response({"error": "start/eind ongeldig"}, status=400)
+            velden["start"], velden["eind"] = start, eind
+        for k in ("locatie", "omschrijving"):
+            if k in body:
+                velden[k] = str(body[k]).strip()[:2000 if k == "omschrijving" else 200]
+        if not velden:
+            return web.json_response({"error": "niets te wijzigen"}, status=400)
+        ok = await asyncio.to_thread(_agenda_bewerk, event_id, velden)
+        if ok:
+            self._gen += 1
+            self._cache = None
+            self._agenda_cache = {}
+            if self._traag:
+                for e in self._traag["week"]:
+                    if e.get("id") == event_id:
+                        if "titel" in velden:
+                            e["titel"] = velden["titel"]
+                        if "start" in velden:
+                            e["start"], e["eind"] = velden["start"], velden["eind"]
+                        if "locatie" in velden:
+                            e["locatie"] = velden["locatie"]
+                        if "omschrijving" in velden:
+                            e["omschrijving"] = velden["omschrijving"][:600]
+                self._traag["week"].sort(key=lambda e: e["start"])
+        return web.json_response({"ok": ok}, status=200 if ok else 502)
 
     async def verzet(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
@@ -1319,6 +1403,21 @@ PAGE = """<!doctype html>
                  overflow-y:auto; }
   #detailkaart h3 { margin-bottom:.6rem; font-size:1.15rem; }
   #dRegels div { padding:.18rem 0; font-size:.95rem; color:var(--dim); }
+  #detailkaart { width:min(480px, 94vw); }
+  #dKnoppen { display:flex; gap:.5rem; margin-top:.8rem; flex-wrap:wrap; align-items:center; }
+  #detailkaart #dKnoppen button { border:1px solid var(--lijn); background:rgba(255,255,255,.05); color:var(--ink);
+                     border-radius:9px; padding:.45rem .9rem; font-size:.92rem; cursor:pointer; margin:0; }
+  #detailkaart #dKnoppen button.primair { background:var(--accent); color:#14171a; border-color:var(--accent); font-weight:600; }
+  .bewerk { display:grid; grid-template-columns:5.2rem 1fr; gap:.45rem .6rem; align-items:center;
+            margin-top:.4rem; }
+  .bewerk label { font-size:.8rem; color:var(--dim); }
+  .bewerk input, .bewerk textarea { width:100%; background:var(--bg); border:1px solid #333a41; border-radius:8px;
+                                   color:var(--ink); padding:.45rem .6rem; font-size:.95rem; font-family:inherit; }
+  .bewerk textarea { min-height:4.2rem; resize:vertical; }
+  .bewerk .tijden { display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+  .bewerk .tijden input[type=time] { width:auto; }
+  .bewerk .tijden label { display:flex; align-items:center; gap:.3rem; font-size:.85rem; color:var(--ink);
+                          white-space:nowrap; }
   #dRegels .omschr { color:var(--ink); white-space:pre-wrap; margin-top:.5rem;
                      border-top:1px solid var(--lijn); padding-top:.6rem; line-height:1.5; }
   #detailkaart button { margin-top:.9rem; border:none; border-radius:10px; padding:.45rem 1.1rem;
@@ -1422,7 +1521,7 @@ PAGE = """<!doctype html>
   <div id="detailkaart" onclick="event.stopPropagation()">
     <h3 id="dTitel"></h3>
     <div id="dRegels"></div>
-    <button onclick="document.getElementById('detail').style.display='none'">Sluiten</button>
+    <div id="dKnoppen"><button onclick="document.getElementById('detail').style.display='none'">Sluiten</button></div>
   </div>
 </div>
 <button id="chatfab" title="Chat met Birdy" onclick="chatOpen(true)">
@@ -2073,7 +2172,65 @@ function detailEv(i){
   if (e.bron) rows += `<div>🔗 ${esc(e.bron)}</div>`;
   if (e.omschrijving) rows += `<div class="omschr">${esc(e.omschrijving)}</div>`;
   document.getElementById('dRegels').innerHTML = rows;
+  // bewerken: alleen Google-afspraken die niet uit een gesynchroniseerde feed komen
+  const bewerkbaar = !!e.id && !/automatisch/i.test(e.bron || '');
+  document.getElementById('dKnoppen').innerHTML =
+    (bewerkbaar ? `<button class="primair" onclick="bewerkEv(${i})">✏️ Bewerken</button>` : '') +
+    (!e.id ? `<span class="notitie" style="align-self:center">alleen-lezen (${esc(e.bron || 'externe bron')})</span>` : '') +
+    `<button onclick="document.getElementById('detail').style.display='none'">Sluiten</button>`;
   document.getElementById('detail').style.display = 'flex';
+}
+function bewerkEv(i){
+  const e = WEEK[i]; if (!e) return;
+  const heleDag = e.start.length <= 10;
+  const dag = e.start.slice(0,10);
+  const eindDag = (e.eind || e.start).slice(0,10);
+  const s = heleDag ? '09:00' : e.start.slice(11,16);
+  const t = heleDag ? '10:00' : (e.eind && e.eind.length > 10 ? e.eind.slice(11,16) : s);
+  document.getElementById('dTitel').textContent = 'Afspraak bewerken';
+  document.getElementById('dRegels').innerHTML = `<div class="bewerk">
+    <label>Titel</label><input id="bwTitel" value="${esc(e.titel)}" maxlength="200">
+    <label>Datum</label><div class="tijden"><input type="date" id="bwDag" value="${dag}">
+      <label><input type="checkbox" id="bwHeleDag" ${heleDag ? 'checked' : ''} onchange="document.getElementById('bwTijden').style.display=this.checked?'none':'flex'"> hele dag</label></div>
+    <label>Tijd</label><div class="tijden" id="bwTijden" style="${heleDag ? 'display:none' : ''}">
+      <input type="time" id="bwStart" value="${s}" step="300"> <span>tot</span> <input type="time" id="bwEind" value="${t}" step="300"></div>
+    <label>Locatie</label><input id="bwLocatie" value="${esc(e.locatie || '')}" maxlength="200">
+    <label>Notitie</label><textarea id="bwOmschr" maxlength="2000">${esc(e.omschrijving || '')}</textarea>
+  </div>`;
+  document.getElementById('dKnoppen').innerHTML =
+    `<button class="primair" onclick="bewaarEv(${i}, ${heleDag && eindDag !== dag ? `'${eindDag}'` : 'null'})">Opslaan</button>` +
+    `<button onclick="detailEv(${i})">Annuleren</button>`;
+  setTimeout(() => document.getElementById('bwTitel').focus(), 50);
+}
+async function bewaarEv(i, meerdaagsEind){
+  const e = WEEK[i]; if (!e) return;
+  const titel = document.getElementById('bwTitel').value.trim();
+  const dag = document.getElementById('bwDag').value;
+  const heleDag = document.getElementById('bwHeleDag').checked;
+  let start, eind;
+  if (heleDag){
+    start = dag;
+    // meerdaagse afspraak: einddatum meeschuiven met het verschil van de begindatum
+    eind = meerdaagsEind ? schuifIso(meerdaagsEind + 'T00:00', Math.round((new Date(dag + 'T00:00') - new Date(e.start.slice(0,10) + 'T00:00')) / 86400000), 0).slice(0,10) : dag;
+  } else {
+    start = `${dag}T${document.getElementById('bwStart').value}`;
+    eind = `${dag}T${document.getElementById('bwEind').value}`;
+    if (eind <= start) { toon('De eindtijd moet na de begintijd liggen.'); return; }
+  }
+  if (!titel || !dag) { toon('Titel en datum zijn nodig.'); return; }
+  const body = { id: e.id, titel, start, eind,
+    locatie: document.getElementById('bwLocatie').value.trim(),
+    omschrijving: document.getElementById('bwOmschr').value.trim() };
+  const knop = document.querySelector('#dKnoppen .primair'); if (knop){ knop.disabled = true; knop.textContent = '… opslaan'; }
+  try {
+    const r = await fetch('/api/event', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'fout');
+    Object.assign(e, { titel, start, eind, locatie: body.locatie, omschrijving: body.omschrijving });
+    renderWeek(WEEK); detailEv(i);
+    toon(`📅 “${titel}” bijgewerkt`); ververs();
+  } catch(err){ toon('Opslaan lukte even niet: ' + err.message); if (knop){ knop.disabled = false; knop.textContent = 'Opslaan'; } }
 }
 
 async function ververs(){
