@@ -279,8 +279,46 @@ def _signalen(acties: list[dict], regelzaken: list[dict], verjaardagen: list[dic
                 out.append({"tekst": f"⚠️ Overlap {dag} {a['start'][11:16]}: {a['titel'][:24]} en {b['titel'][:24]}",
                             "l2": "week", "ernst": 0})
 
+    for a_tekst, o_naam in _dubbelingen(acties, onderwerpen)[:2]:
+        out.append({"tekst": f"👀 Mogelijk dubbel: “{a_tekst[:30]}” (actie) en “{o_naam[:30]}” (onderwerp)",
+                    "l2": "onderwerpen", "ernst": 1})
+
     out.sort(key=lambda s: s["ernst"])
     return out[:8]
+
+
+_STOPWOORDEN = {"voor", "naar", "over", "kopen", "regelen", "checken", "maken", "laten", "weten",
+                "zodra", "bellen", "sturen", "versturen", "afmaken", "invullen", "geregeld", "vandaag",
+                "morgen", "week", "deze", "die", "dat", "het", "een", "van", "met", "nog", "wordt"}
+
+
+def _woorden(tekst: str) -> set[str]:
+    import re
+
+    return {w for w in re.findall(r"[a-zà-ÿ0-9]+", tekst.lower()) if len(w) >= 4 and w not in _STOPWOORDEN}
+
+
+def _dubbelingen(acties: list[dict], onderwerpen: list[dict]) -> list[tuple[str, str]]:
+    """Actie en onderwerp die (bijna) over hetzelfde gaan: minstens twee gedeelde kernwoorden
+    én meer dan de helft van de woorden van de kortste van de twee. Een actie die het
+    onderwerp als voorvoegsel draagt ('Kinderfeest Evi: gastenlijst invullen') is bewust
+    zo gemaakt en telt niet mee."""
+    out = []
+    for a in acties:
+        wa = _woorden(a.get("tekst", ""))
+        if len(wa) < 2:
+            continue
+        for o in onderwerpen:
+            if ":" in a.get("tekst", "") and a["tekst"].lower().startswith(o["naam"].lower()[:12]):
+                continue
+            wo = _woorden(o["naam"])
+            if len(wo) < 2:
+                continue
+            gedeeld = wa & wo
+            if len(gedeeld) >= 2 and len(gedeeld) / min(len(wa), len(wo)) > 0.5:
+                out.append((a["tekst"], o["naam"]))
+                break
+    return out
 
 
 def _todoist_lijst(naam: str) -> list[dict]:

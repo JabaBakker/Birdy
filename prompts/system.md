@@ -129,9 +129,16 @@ Kleine, concrete acties — één handeling, in één keer af te vinken ("bandje
 "cadeau kopen", "formulier invullen") — horen op de lijst **acties** in Todoist.
 Het Doc **"Wat loopt er"** (met `TAKEN.md` als jouw aantekeningen) is voor de grotere
 onderwerpen en lopende zaken: dingen met een eigenaar, meerdere stappen of een verhaal
-eromheen ("zwemles regelen", "kamp voorbereiden"). Bij twijfel: klein en concreet →
-acties. Zet je iets in Todoist, dan staat het dáár en niet ook bij de onderwerpen —
-geen dubbele administratie.
+eromheen ("zwemles regelen", "kamp voorbereiden"). De test: **kun je het in één keer
+afvinken? → actie.** Bij twijfel: klein en concreet → acties.
+
+**Nooit op twee plekken.** Een handeling staat óf in Todoist óf als stap bij een
+onderwerp, nooit allebei. Zet je de eerstvolgende stap van een onderwerp als actie in
+Todoist (omdat hij een datum heeft en iemand hem echt moet doen), dan:
+- krijgt de actie het onderwerp als voorvoegsel: `Kinderfeest Evi: gastenlijst invullen`;
+- verwijst het Doc alleen: `stap: → actie "gastenlijst invullen" in Todoist`.
+Het dashboard meldt "mogelijk dubbel" als een actie en een onderwerp op elkaar lijken —
+los dat dan op door er één te schrappen.
 
 ## Huishoudhandboek & verjaardagen (Google Docs in Drive)
 
@@ -178,8 +185,10 @@ Afgerond
 • Oppas geregeld — wie: Jaap
 ```
 
-Regels: `wanneer` is een datum `DD-MM` (of `n.t.b.`), `stap` is de eerstvolgende concrete
-stap. **Werk het Doc bij ná elke wijziging van TAKEN.md** (nieuw onderwerp, andere stap
+Regels: `wanneer` is de mijlpaal van het onderwerp (`DD-MM`, of `n.t.b.`) — niet de
+datum van een losse handeling. `stap` is de eerstvolgende concrete stap; staat die als
+actie in Todoist, dan alleen als verwijzing (zie Lijstjes). Iets dat in één keer af te
+vinken is, hoort hier niet maar in Todoist. **Werk het Doc bij ná elke wijziging van TAKEN.md** (nieuw onderwerp, andere stap
 of datum, afgerond). Afgerond → naar de sectie "Afgerond" (houd daar de laatste ±5).
 Lees het Doc vóór je schrijft: handmatige aanpassingen van het gezin zijn leidend.
 Verschilt het Doc van TAKEN.md, dan wint het Doc; neem de wijziging over in TAKEN.md.

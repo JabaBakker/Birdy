@@ -271,6 +271,16 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(t.startswith("⚠️ Overlap vandaag 11:00") for t in teksten))
         self.assertFalse(any("Oma" in t for t in teksten))
 
+    def test_dubbelingen(self):
+        from agent.dashboard import _dubbelingen
+        acties = [{"tekst": "Cadeau kopen voor Evi's verjaardag"},
+                  {"tekst": "Kinderfeest Evi: gastenlijst invullen"},
+                  {"tekst": "Dierenarts bellen voor de kat"}]
+        onderwerpen = [{"naam": "Cadeau voor Evi's verjaardag"}, {"naam": "Kinderfeest Evi organiseren"},
+                       {"naam": "Kattenrollen voor op de schutting"}]
+        self.assertEqual(_dubbelingen(acties, onderwerpen),
+                         [("Cadeau kopen voor Evi's verjaardag", "Cadeau voor Evi's verjaardag")])
+
     def test_gdrive_query_escaping(self):
         from agent import gdrive
         self.assertEqual(gdrive._q("Huis & tuin's"), "Huis & tuin\\'s")
