@@ -303,6 +303,19 @@ def _regelzaken() -> list[dict]:
     return out[:30]
 
 
+def _thuis() -> dict | None:
+    """Stand van het huis via Homey; None als niet gekoppeld of even onbereikbaar."""
+    from . import homey
+
+    if not homey.geconfigureerd():
+        return None
+    try:
+        return homey.samenvatting()
+    except BaseException:
+        log.warning("Homey ophalen mislukt", exc_info=True)
+        return None
+
+
 def _verjaardagen() -> list[dict]:
     from . import gdrive
 
@@ -367,6 +380,7 @@ class Dashboard:
         app.router.add_post("/api/due", self.due)
         app.router.add_post("/api/reopen", self.reopen)
         app.router.add_post("/api/verzet", self.verzet)
+        app.router.add_post("/api/homey/lamp", self.homey_lamp)
         app.router.add_get("/logo.png", self.logo)
         app.router.add_get("/logo-bird.png", self.logo)
         self._runner = web.AppRunner(app, access_log=None)
@@ -418,19 +432,22 @@ class Dashboard:
     async def _bouw(self) -> dict:
         gen = self._gen
         if not self._traag or time.time() - self._traag_ts > CACHE_TTL:
-            (week, compleet), jarigen, regelzaken = await asyncio.gather(
+            (week, compleet), jarigen, regelzaken, thuis = await asyncio.gather(
                 asyncio.to_thread(_agenda_rijk),
                 asyncio.to_thread(_verjaardagen),
                 asyncio.to_thread(_regelzaken),
+                asyncio.to_thread(_thuis),
             )
             if compleet or not self._traag:
-                self._traag = {"week": week, "verjaardagen": jarigen, "regelzaken": regelzaken}
+                self._traag = {"week": week, "verjaardagen": jarigen,
+                               "regelzaken": regelzaken, "thuis": thuis}
                 self._traag_ts = time.time()
             else:
                 # een bron faalde: houd de vorige complete week vast en probeer bij de
                 # volgende aanvraag meteen opnieuw (ts bewust niet bijgewerkt)
                 self._traag["verjaardagen"] = jarigen
                 self._traag["regelzaken"] = regelzaken
+                self._traag["thuis"] = thuis or self._traag.get("thuis")
         boodschappen, acties, boodschappen_af, acties_af = await asyncio.gather(
             asyncio.to_thread(_todoist_lijst, "boodschappen"),
             asyncio.to_thread(_todoist_lijst, "acties"),
@@ -451,6 +468,7 @@ class Dashboard:
             "acties_af": acties_af,
             "verjaardagen": self._traag["verjaardagen"],
             "regelzaken": self._traag.get("regelzaken", []),
+            "thuis": self._traag.get("thuis"),
         }
         if gen == self._gen:  # geen mutatie tijdens het bouwen → cachen mag
             self._cache = vers
@@ -551,6 +569,30 @@ class Dashboard:
                         e["start"], e["eind"] = start, eind
                 self._traag["week"].sort(key=lambda e: e["start"])
         return web.json_response({"ok": ok}, status=200 if ok else 502)
+
+    async def homey_lamp(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            device_id = str(body.get("id", "")).strip()
+            aan = bool(body.get("aan", False))
+        except Exception:
+            device_id = ""
+        if not device_id or len(device_id) > 80:
+            return web.json_response({"error": "geen apparaat"}, status=400)
+        from . import homey
+        try:
+            await asyncio.to_thread(homey.zet_aan_uit, device_id, aan)
+        except Exception as e:
+            fout = "geen rechten (scope 'Apparaten: bedienen' ontbreekt)" if "403" in str(e) else str(e)[:120]
+            return web.json_response({"error": fout}, status=502)
+        thuis = await asyncio.to_thread(_thuis)
+        if self._traag and thuis:
+            self._traag["thuis"] = thuis
+        self._cache = None
+        self._gen += 1
+        return web.json_response({"ok": True})
 
     async def add(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
@@ -933,6 +975,8 @@ PAGE = """<!doctype html>
   #l2Inhoud li { padding:.28rem 0; font-size:.97rem; line-height:1.4; display:flex;
                  gap:.5rem; align-items:baseline; }
   #l2Inhoud li small { color:var(--dim); font-variant-numeric:tabular-nums; flex:0 0 3.1rem; }
+  #l2Inhoud li small.waarde { flex:0 0 auto; white-space:nowrap; color:var(--ink);
+                              margin-left:auto; font-size:.92rem; }
   #l2Inhoud li span { flex:1; min-width:0; }
   #l2Inhoud .notitie { color:var(--dim); font-style:italic; font-size:.88rem; }
   #l2Inhoud .afitem span { text-decoration:line-through; color:var(--dim); }
@@ -990,6 +1034,8 @@ PAGE = """<!doctype html>
         <h3>🎂 Verjaardagen</h3><ul id="mvList"></ul></div>
       <div class="mini" onclick="openL2('regelzaken')">
         <h3>🔁 Regelzaken</h3><ul id="mrList"></ul></div>
+      <div class="mini" id="miniThuis" style="display:none" onclick="openL2('thuis')">
+        <h3>🏠 Thuis</h3><ul id="mtList"></ul></div>
     </aside>
     <div class="hoofd">
       <div class="panel"><h2 class="klik" onclick="kiesTab('week')" title="Naar weekoverzicht">📅 Agenda ↗</h2><ul id="agenda"></ul></div>
@@ -1125,6 +1171,22 @@ function filterItems(items, tekstVan){
     return L2filter === 'overig' ? !p : (p && p.naam === L2filter);
   });
 }
+function kw(w){ return (Math.round((w || 0) / 100) / 10).toFixed(1).replace('.', ',') + ' kW'; }
+function nettoLabel(th){
+  if (th.zon_w === null || th.net_w === null) return '';
+  const netto = th.zon_w - th.net_w;
+  return `<small class="${netto >= 0 ? 'nu' : ''}">${netto >= 0 ? '↑' : '↓'} ${kw(Math.abs(netto))}</small>`;
+}
+async function lampUit(id){
+  try {
+    const r = await fetch('/api/homey/lamp', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ id, aan: false }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'fout');
+    toon('💡 Uit gezet'); ververs();
+  } catch(e){ toon('Lamp schakelen lukte niet: ' + e.message); }
+}
 function dagenLabel(d){
   if (d === null || d === undefined) return '';
   if (d < 0) return 'te laat';
@@ -1198,9 +1260,38 @@ function renderL2(){
   document.getElementById('l2Titel').textContent = {
     taken: '📋 Alles wat loopt', boodschappen: '🛒 Boodschappen',
     acties: '⚡ Acties — alles', verjaardagen: '🎂 Verjaardagen & cadeau-ideeën',
-    regelzaken: '🔁 Regelzaken — huishoudhandboek',
+    regelzaken: '🔁 Regelzaken — huishoudhandboek', thuis: '🏠 Thuis — via Homey',
   }[L2open];
   let html = '';
+  if (L2open === 'thuis'){
+    const th = DATA.thuis;
+    if (!th){ document.getElementById('l2Inhoud').innerHTML = '<p class="leeg">Homey is even niet bereikbaar.</p>'; return; }
+    html += '<h4>⚡ Energie</h4><ul>';
+    if (th.zon_w !== null) html += `<li><span>☀️ Zonnepanelen</span><small class="waarde">${kw(th.zon_w)}</small></li>`;
+    if (th.net_w !== null) html += `<li><span>🏠 Verbruik (slimme meter)</span><small class="waarde">${kw(th.net_w)}</small></li>`;
+    if (th.zon_w !== null && th.net_w !== null){
+      const netto = th.zon_w - th.net_w;
+      html += `<li><span>${netto >= 0 ? '↑ Teruglevering' : '↓ Van het net'}</span><small class="waarde">${kw(Math.abs(netto))}</small></li>`;
+    }
+    html += '</ul>';
+    if ((th.klimaat || []).length){
+      html += '<h4>🌡️ Klimaat</h4><ul>' + th.klimaat.map(k =>
+        `<li><span>${esc(k.kamer)}</span><small class="waarde">${k.temp}°${k.doel !== null && k.doel !== undefined ? ' · doel ' + k.doel + '°' : ''}</small></li>`).join('') + '</ul>';
+    }
+    const lampen = th.lampen_aan || [];
+    html += `<h4>💡 Lampen aan (${lampen.length})</h4><ul>` + (lampen.length ? lampen.map(l =>
+      `<li><span>${esc(l.naam)}${l.kamer ? ` <span class="notitie">· ${esc(l.kamer)}</span>` : ''}</span>` +
+      `<button class="herstelknop" onclick="lampUit('${l.id}')">uit</button></li>`).join('')
+      : '<li class="leeg">alles uit 🌙</li>') + '</ul>';
+    const app = [];
+    if (th.auto) app.push(`<li><span>🚗 ${esc(th.auto.naam)}</span><small class="waarde">${th.auto.batterij ?? '?'}%${th.auto.laadt ? ' · laadt ⚡' : ''}</small></li>`);
+    if (th.deur) app.push(`<li><span>🚪 ${esc(th.deur.naam)}</span><small class="waarde">${th.deur.dicht === true ? '🔒 op slot' : th.deur.dicht === false ? '🔓 open' : 'onbekend'}</small></li>`);
+    if (th.stofzuiger) app.push(`<li><span>🧹 ${esc(th.stofzuiger.naam)}</span><small class="waarde">${th.stofzuiger.batterij ?? '?'}%</small></li>`);
+    if (th.tv_aan !== null && th.tv_aan !== undefined) app.push(`<li><span>📺 TV</span><small class="waarde">${th.tv_aan ? 'aan' : 'uit'}</small></li>`);
+    if (app.length) html += '<h4>🔌 Apparaten</h4><ul>' + app.join('') + '</ul>';
+    html += `<p class="notitie" style="margin-top:.8rem">${th.aantal} apparaten via Homey Pro</p>`;
+    document.getElementById('l2Inhoud').innerHTML = html; return;
+  }
   if (L2open === 'regelzaken'){
     const items = DATA.regelzaken || [];
     html = '<ul>' + (items.length ? items.map((z, i) =>
@@ -1495,6 +1586,25 @@ async function ververs(){
           `${dagenLabel(z.dagen)}</small></li>`).join('') +
         (mr.length > 3 ? `<li class="meer">… nog ${mr.length - 3}</li>` : '')
       : '<li class="leeg">handboek nog leeg</li>';
+    const th = d.thuis;
+    const miniThuis = document.getElementById('miniThuis');
+    miniThuis.style.display = th ? 'block' : 'none';
+    if (th){
+      const rijen = [];
+      if (th.zon_w !== null || th.net_w !== null){
+        let r = (th.zon_w !== null ? `☀️ ${kw(th.zon_w)}` : '') +
+                (th.net_w !== null ? ` · ⚡ ${kw(th.net_w)}` : '');
+        rijen.push(`<li><span>${r}</span>${nettoLabel(th)}</li>`);
+      }
+      const woon = (th.klimaat || []).find(k => /woon/i.test(k.kamer)) || (th.klimaat || [])[0];
+      if (woon) rijen.push(`<li><span>🌡️ ${woon.temp}° ${esc(woon.kamer)}</span></li>`);
+      if (th.auto) rijen.push(`<li><span>🚗 ${esc(th.auto.naam)}</span>` +
+        `<small>${th.auto.batterij ?? '?'}%${th.auto.laadt ? ' ⚡' : ''}</small></li>`);
+      const lampen = (th.lampen_aan || []).length;
+      const deur = th.deur ? (th.deur.dicht === true ? '🔒 op slot' : th.deur.dicht === false ? '🔓 open' : '') : '';
+      if (lampen || deur) rijen.push(`<li><span>${lampen ? `💡 ${lampen} aan` : ''}${lampen && deur ? ' · ' : ''}${deur}</span></li>`);
+      document.getElementById('mtList').innerHTML = rijen.join('') || '<li class="leeg">geen gegevens</li>';
+    }
     renderL2();
   } catch (e) { /* volgende poging over 60s */ }
 }
