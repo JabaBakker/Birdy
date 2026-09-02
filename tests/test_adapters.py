@@ -261,9 +261,9 @@ class Tests(unittest.IsolatedAsyncioTestCase):
 
     def test_onderwerpen_parse(self):
         from datetime import date
-        from agent.dashboard import _onderwerpen_parse
+        from agent.bronnen import onderwerpen_parse
         vandaag = date(2026, 9, 2)
-        items = _onderwerpen_parse(
+        items = onderwerpen_parse(
             "WAT LOOPT ER\n\nGrotere onderwerpen met een eigenaar.\n\n"
             "• Kinderfeest Evi — wie: Jaap · wanneer: 06-09 · stap: gastenlijst invullen\n"
             "• KPN moeder — wie: Jaap · wanneer: n.t.b. · notitie: Youfone vanaf €42\n"
@@ -278,9 +278,9 @@ class Tests(unittest.IsolatedAsyncioTestCase):
 
     def test_signalen(self):
         from datetime import date
-        from agent.dashboard import _signalen
+        from agent.signalen import bereken
         vandaag = date(2026, 9, 2)
-        sig = _signalen(
+        sig = bereken(
             acties=[{"tekst": "band plakken", "due": "2026-08-30"}, {"tekst": "cadeau Avie", "due": "2026-09-02"}],
             regelzaken=[{"naam": "Kapper Evi", "wie": "Jaap", "dagen": -3}],
             verjaardagen=[{"naam": "Avie", "dagen": 1, "notitie": ""}, {"naam": "Oma", "dagen": 3, "notitie": "boek"}],
@@ -360,13 +360,13 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([i for i, _ in bijwerken], ["g1"])
 
     def test_dubbelingen(self):
-        from agent.dashboard import _dubbelingen
+        from agent.signalen import dubbelingen
         acties = [{"tekst": "Cadeau kopen voor Evi's verjaardag"},
                   {"tekst": "Kinderfeest Evi: gastenlijst invullen"},
                   {"tekst": "Dierenarts bellen voor de kat"}]
         onderwerpen = [{"naam": "Cadeau voor Evi's verjaardag"}, {"naam": "Kinderfeest Evi organiseren"},
                        {"naam": "Kattenrollen voor op de schutting"}]
-        self.assertEqual(_dubbelingen(acties, onderwerpen),
+        self.assertEqual(dubbelingen(acties, onderwerpen),
                          [("Cadeau kopen voor Evi's verjaardag", "Cadeau voor Evi's verjaardag")])
 
     def test_gdrive_query_escaping(self):

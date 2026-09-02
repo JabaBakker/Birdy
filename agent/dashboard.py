@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from aiohttp import web
+
+from . import agenda, bronnen, signalen, todoist
+from .brain import Brain
+from .config import Config
 
 STATIC_DIR = Path(__file__).parent / "static"  # dashboard.html/.css/.js + logo's
 
@@ -36,583 +39,10 @@ def _static_versie() -> str:
             pass
     return h.hexdigest()[:10]
 
-from .brain import Brain
-from .config import Config
 
 log = logging.getLogger("fien.dashboard")
 
 CACHE_TTL = 120  # seconden
-
-
-def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
-    """Afspraken mét eindtijd voor de komende `days` dagen (Vandaag-tab en weekcache)."""
-    now = datetime.now()
-    return _agenda_bereik(now, now + timedelta(days=days))
-
-
-def _agenda_bereik(van: datetime, tot: datetime, zoek: str = "") -> tuple[list[dict], bool]:
-    """Afspraken uit beide bronnen in [van, tot): ([{start, eind, titel, …}], compleet).
-    `zoek` filtert op titel/omschrijving/locatie (Google zoekt zelf, FamilyWall lokaal).
-    compleet=False als een bron faalde — dan is het resultaat mogelijk (deels) leeg en
-    houdt de cache liever de vorige complete versie vast."""
-    events: list[dict] = []
-    google_ok = not os.environ.get("GOOGLE_CALENDAR_ID")
-    fw_ok = True
-    zoek = zoek.strip().lower()
-    try:
-        from . import gcal
-        if os.environ.get("GOOGLE_CALENDAR_ID"):
-            svc = gcal._service()
-            params = dict(
-                calendarId=os.environ["GOOGLE_CALENDAR_ID"],
-                timeMin=van.astimezone().isoformat(),
-                timeMax=tot.astimezone().isoformat(),
-                singleEvents=True, orderBy="startTime", maxResults=120 if zoek else 60,
-                timeZone="Europe/Amsterdam",  # anders komt alles in UTC (2 uur te vroeg)
-            )
-            if zoek:
-                params["q"] = zoek
-            resp = svc.events().list(**params).execute()
-            for ev in resp.get("items", []):
-                s, e = ev.get("start", {}), ev.get("end", {})
-                wie = ev.get("creator", {}) or {}
-                org = ev.get("organizer", {}) or {}
-                naam = (org.get("displayName") or wie.get("displayName")
-                        or wie.get("email") or org.get("email") or "")
-                # door Birdy gesynchroniseerde feed (bijv. "Volleybal Yvette") → label als bron,
-                # zodat het dashboard op de persoonsnaam in het label kan kleuren
-                sync_label = ((ev.get("extendedProperties") or {}).get("private") or {}).get("birdy_sync", "")
-                bron = f"{sync_label} · automatisch in de gezinsagenda" if sync_label else "Gezinsagenda (Google)"
-                def lokaal(v: str) -> str:  # dateTime met offset → NL-wandkloktijd
-                    if "T" in v:
-                        return gcal._lokaal(datetime.fromisoformat(v)).strftime("%Y-%m-%dT%H:%M")
-                    return v[:10]
-                events.append({
-                    "id": ev.get("id", ""),
-                    "start": lokaal(s.get("dateTime") or s.get("date", "")),
-                    "eind": lokaal(e.get("dateTime") or e.get("date", "")),
-                    "titel": ev.get("summary", "(zonder titel)"),
-                    "omschrijving": (ev.get("description") or "")[:600],
-                    "locatie": ev.get("location", ""),
-                    "wie": naam.replace("bakkerbirdy@gmail.com", "Birdy"),
-                    "bron": bron,
-                })
-            google_ok = True
-    except BaseException:  # SystemExit van de CLI-helpers telt ook
-        log.warning("Google-agenda ophalen mislukt", exc_info=True)
-    from . import gcal
-
-    feeds = gcal.ics_feeds()
-    fw_ok = not feeds
-    if feeds:
-        import icalendar
-        import recurring_ical_events
-        import requests
-
-        def iso(v) -> str:
-            if isinstance(v, datetime):
-                return gcal._lokaal(v).strftime("%Y-%m-%dT%H:%M")
-            return v.strftime("%Y-%m-%d") if v else ""
-
-        alle_ok = True
-        for label, url in feeds:
-            try:
-                resp = requests.get(url, timeout=30)
-                resp.raise_for_status()
-                cal = icalendar.Calendar.from_ical(resp.content)
-                for ev in recurring_ical_events.of(cal).between(van, tot):
-                    start = ev.get("DTSTART").dt
-                    eind = ev.get("DTEND")
-                    if zoek and zoek not in " ".join(str(ev.get(k, "")) for k in
-                                                     ("SUMMARY", "DESCRIPTION", "LOCATION")).lower():
-                        continue
-                    events.append({
-                        "id": "",  # alleen-lezen: iCal-afspraken kunnen niet verzet worden
-                        "start": iso(start),
-                        "eind": iso(eind.dt if eind else None) or iso(start),
-                        "titel": str(ev.get("SUMMARY", "(zonder titel)")),
-                        "omschrijving": str(ev.get("DESCRIPTION", ""))[:600],
-                        "locatie": str(ev.get("LOCATION", "")),
-                        "wie": "",
-                        "bron": label,
-                    })
-            except BaseException:
-                alle_ok = False
-                log.warning("iCal-feed %s ophalen mislukt", label, exc_info=True)
-        fw_ok = alle_ok
-    # zelfde moment + titel uit beide bronnen → één keer
-    seen, uniek = set(), []
-    for ev in sorted(events, key=lambda e: e["start"]):
-        key = (ev["start"], ev["titel"].strip().lower())
-        if key in seen:
-            continue
-        seen.add(key)
-        uniek.append(ev)
-    return uniek[:200 if zoek else 60], google_ok and fw_ok
-
-
-def _agenda_compact(rijk: list[dict]) -> list[dict]:
-    return [{
-        "wanneer": ev["start"].replace("T", " "),
-        "titel": ev["titel"],
-    } for ev in rijk][:22]
-
-
-def _datum_dagen(tekst: str, vandaag: date | None = None) -> int | None:
-    """DD-MM(-JJJJ) ergens in de tekst → aantal dagen vanaf vandaag (negatief = voorbij).
-    Zonder jaar: de eerstvolgende keer dat die datum valt (of net voorbij, tot 60 dagen)."""
-    import re
-
-    vandaag = vandaag or date.today()
-    m = re.search(r"(\d{1,2})-(\d{1,2})(?:-(\d{4}))?", tekst)
-    if not m:
-        return None
-    dag, maand, jaar = int(m.group(1)), int(m.group(2)), m.group(3)
-    try:
-        if jaar:
-            return (date(int(jaar), maand, dag) - vandaag).days
-        d = date(vandaag.year, maand, dag)
-        if (d - vandaag).days < -60:
-            d = date(vandaag.year + 1, maand, dag)
-        return (d - vandaag).days
-    except ValueError:
-        return None
-
-
-def _onderwerpen_parse(text: str, vandaag: date | None = None) -> list[dict]:
-    """Lopende onderwerpen uit het Google Doc 'Wat loopt er'. Regelformat:
-    • Kinderfeest Evi — wie: Jaap · wanneer: 06-09 · stap: gastenlijst invullen · notitie: …
-    Regels onder een kop 'Afgerond' of beginnend met ✅ tellen niet mee."""
-    import re
-
-    def veld(s: str, naam: str) -> str:
-        m = re.search(r"\b" + naam + r"\s*:\s*([^·]+)", s, re.I)
-        return m.group(1).strip() if m else ""
-
-    out, klaar = [], False
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        if re.match(r"^(#+\s*)?(afgerond|klaar|gedaan)\b", s, re.I):
-            klaar = True
-            continue
-        if not s.startswith(("•", "-", "*", "✅")):
-            continue
-        if klaar or s.startswith("✅") or "✅" in s[:3]:
-            continue
-        s = s.lstrip("•-* ").strip()
-        naam = re.split(r"\s+[—–-]\s+|\s+·\s+", s)[0].strip()
-        if not naam:
-            continue
-        wanneer = veld(s, "wanneer")
-        out.append({
-            "naam": naam[:80], "wie": veld(s, "wie")[:30], "wanneer": wanneer[:30],
-            "dagen": _datum_dagen(wanneer, vandaag) if wanneer else None,
-            "stap": veld(s, "(?:volgende )?stap")[:160], "notitie": veld(s, "notitie")[:300],
-        })
-    out.sort(key=lambda o: (o["dagen"] is None, o["dagen"] if o["dagen"] is not None else 0))
-    return out[:30]
-
-
-def _doc_tekst(pad: str) -> str:
-    """Platte tekst van een Google Doc in de Drive-hub; '' als hij er niet is of Drive uit staat."""
-    from . import gdrive
-
-    try:
-        svc = gdrive._service()
-        node = gdrive._resolve(svc, pad, must_exist=False)
-        if not node:
-            return ""
-        text = svc.files().export(fileId=node["id"], mimeType="text/plain").execute()
-        return text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
-    except BaseException:
-        return ""
-
-
-ONDERWERPEN_DOC = "Wat loopt er"
-
-
-def _onderwerpen() -> list[dict]:
-    return _onderwerpen_parse(_doc_tekst(ONDERWERPEN_DOC))
-
-
-def _aandacht_birdy(workspace: Path) -> dict:
-    """Birdy's aandachtspunten uit AANDACHT.md (geschreven door de ochtendbriefing).
-    Format: eerste regel '💡 AANDACHT (bijgewerkt DD-MM HH:MM)', daarna • regels (max 3)."""
-    import re
-
-    pad = workspace / "AANDACHT.md"
-    if not pad.exists():
-        return {"tijd": "", "items": []}
-    items, tijd = [], ""
-    for line in pad.read_text().splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        m = re.search(r"bijgewerkt\s+([\d-]+\s+[\d:]+)", s, re.I)
-        if m and not tijd:
-            tijd = m.group(1)
-            continue
-        if s.startswith(("•", "-", "*")):
-            items.append(s.lstrip("•-* ").strip()[:200])
-    # ouder dan 3 dagen → niet meer tonen (Birdy schrijft ze bij de weekplanning of op verzoek)
-    dagen = _datum_dagen(tijd) if tijd else None
-    if dagen is not None and dagen < -3:
-        return {"tijd": tijd, "items": [], "oud": True}
-    return {"tijd": tijd, "items": items[:3], "oud": False}
-
-
-def _signalen(acties: list[dict], regelzaken: list[dict], verjaardagen: list[dict],
-              week: list[dict], onderwerpen: list[dict], vandaag: date | None = None) -> list[dict]:
-    """Regel-gebaseerde aandachtspunten, zonder LLM. Elk item: {tekst, l2, ernst}
-    (ernst 0 = te laat/vandaag, 1 = binnenkort). l2 = welk blad opent bij klikken."""
-    vandaag = vandaag or date.today()
-    out: list[dict] = []
-    vandaag_s = vandaag.isoformat()
-
-    te_laat = [a for a in acties if a.get("due") and a["due"] < vandaag_s]
-    if te_laat:
-        n = len(te_laat)
-        out.append({"tekst": f"{n} actie{'s' if n > 1 else ''} over de datum: "
-                             + ", ".join(a["tekst"][:28] for a in te_laat[:2])
-                             + (" …" if n > 2 else ""), "l2": "acties", "ernst": 0})
-    # acties van vandaag niet apart melden: die staan al onder "Nu" in de actiekolom
-
-    for o in onderwerpen:
-        if o["dagen"] is not None and o["dagen"] <= 1:
-            wanneer = "vandaag" if o["dagen"] == 0 else "morgen" if o["dagen"] == 1 \
-                else f"{-o['dagen']} dag{'en' if o['dagen'] < -1 else ''} over tijd"
-            out.append({"tekst": f"📂 {o['naam']}: {wanneer}"
-                                 + (f" — {o['stap']}" if o["stap"] else ""),
-                        "l2": "onderwerpen", "ernst": 0 if o["dagen"] <= 0 else 1})
-
-    for z in regelzaken:
-        if z.get("dagen") is not None and z["dagen"] < 0:
-            out.append({"tekst": f"🔁 {z['naam']} is {-z['dagen']} dag{'en' if z['dagen'] < -1 else ''} over tijd"
-                                 + (f" ({z['wie']})" if z.get("wie") else ""),
-                        "l2": "regelzaken", "ernst": 0})
-
-    for j in verjaardagen:
-        if j.get("dagen") is not None and 0 <= j["dagen"] <= 7 and not (j.get("notitie") or "").strip():
-            wanneer = "vandaag" if j["dagen"] == 0 else "morgen" if j["dagen"] == 1 else f"over {j['dagen']} dagen"
-            naam = j["naam"].split("(")[0].strip()
-            out.append({"tekst": f"🎂 {j['naam']} {wanneer}, nog geen cadeau-idee",
-                        "l2": "verjaardagen", "ernst": 1 if j["dagen"] > 1 else 0,
-                        "knop": {"label": "Cadeau-actie toevoegen", "tekst": f"Cadeau voor {naam}",
-                                 "datum": (vandaag + timedelta(days=max(0, j["dagen"] - 1))).isoformat()}})
-
-    # overlappende afspraken met tijd, vandaag en morgen
-    morgen_s = (vandaag + timedelta(days=1)).isoformat()
-    getimed = [e for e in week if "T" in e.get("start", "") and e["start"][:10] in (vandaag_s, morgen_s)]
-    gemeld: set[tuple[str, str]] = set()
-    for i, a in enumerate(getimed):
-        for b in getimed[i + 1:]:
-            if a["start"][:10] != b["start"][:10]:
-                continue
-            a_eind, b_eind = a.get("eind") or a["start"], b.get("eind") or b["start"]
-            if a["start"] < b_eind and b["start"] < a_eind:
-                sleutel = tuple(sorted((a["titel"], b["titel"])))
-                if sleutel in gemeld:
-                    continue
-                gemeld.add(sleutel)
-                dag = "vandaag" if a["start"][:10] == vandaag_s else "morgen"
-                out.append({"tekst": f"⚠️ Overlap {dag} {a['start'][11:16]}: {a['titel'][:24]} en {b['titel'][:24]}",
-                            "l2": "week", "ernst": 0})
-
-    for a_tekst, o_naam in _dubbelingen(acties, onderwerpen)[:2]:
-        out.append({"tekst": f"👀 Mogelijk dubbel: “{a_tekst[:30]}” (actie) en “{o_naam[:30]}” (onderwerp)",
-                    "l2": "onderwerpen", "ernst": 1})
-
-    out.sort(key=lambda s: s["ernst"])
-    return out[:8]
-
-
-_STOPWOORDEN = {"voor", "naar", "over", "kopen", "regelen", "checken", "maken", "laten", "weten",
-                "zodra", "bellen", "sturen", "versturen", "afmaken", "invullen", "geregeld", "vandaag",
-                "morgen", "week", "deze", "die", "dat", "het", "een", "van", "met", "nog", "wordt"}
-
-
-def _woorden(tekst: str) -> set[str]:
-    import re
-
-    return {w for w in re.findall(r"[a-zà-ÿ0-9]+", tekst.lower()) if len(w) >= 4 and w not in _STOPWOORDEN}
-
-
-def _dubbelingen(acties: list[dict], onderwerpen: list[dict]) -> list[tuple[str, str]]:
-    """Actie en onderwerp die (bijna) over hetzelfde gaan: minstens twee gedeelde kernwoorden
-    én meer dan de helft van de woorden van de kortste van de twee. Een actie die het
-    onderwerp als voorvoegsel draagt ('Kinderfeest Evi: gastenlijst invullen') is bewust
-    zo gemaakt en telt niet mee."""
-    out = []
-    for a in acties:
-        wa = _woorden(a.get("tekst", ""))
-        if len(wa) < 2:
-            continue
-        for o in onderwerpen:
-            if ":" in a.get("tekst", "") and a["tekst"].lower().startswith(o["naam"].lower()[:12]):
-                continue
-            wo = _woorden(o["naam"])
-            if len(wo) < 2:
-                continue
-            gedeeld = wa & wo
-            if len(gedeeld) >= 2 and len(gedeeld) / min(len(wa), len(wo)) > 0.5:
-                out.append((a["tekst"], o["naam"]))
-                break
-    return out
-
-
-def _todoist_lijst(naam: str) -> list[dict]:
-    from . import todoist
-
-    try:
-        project = todoist._project(naam)
-        tasks = todoist._list_all("/tasks", {"project_id": project["id"]})
-        out = [{
-            "id": str(t["id"]),
-            "tekst": t["content"],
-            "due": ((t.get("due") or {}).get("date") or "")[:10],
-            "notitie": (t.get("description") or "")[:400],
-        } for t in tasks]
-        out.sort(key=lambda t: (t["due"] == "", t["due"]))  # deadlines eerst, oplopend
-        return out[:50]  # de Vandaag-tab toont de top; de verdiepende pagina alles
-    except BaseException:
-        return []
-
-
-def _todoist_afvinken(task_id: str) -> bool:
-    from . import todoist
-
-    try:
-        todoist._request("POST", f"/tasks/{task_id}/close")
-        return True
-    except BaseException:
-        return False
-
-
-def _todoist_afgevinkt(naam: str) -> list[dict]:
-    """Onlangs afgevinkte taken (7 dagen) van een project, voor de herstel-lijst."""
-    from datetime import timezone
-
-    from . import todoist
-
-    try:
-        project = todoist._project(naam)
-        nu = datetime.now(timezone.utc)
-        data = todoist._request("GET", "/tasks/completed/by_completion_date", params={
-            "project_id": project["id"],
-            "since": (nu - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "until": nu.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        })
-        items = data.get("items") or data.get("results") or []
-        return [{"id": str(t["id"]), "tekst": t["content"]} for t in items][:6]
-    except BaseException:
-        return []
-
-
-def _todoist_heropen(task_id: str) -> bool:
-    from . import todoist
-
-    try:
-        todoist._request("POST", f"/tasks/{task_id}/reopen")
-        return True
-    except BaseException:
-        return False
-
-
-def _todoist_deadline(task_id: str, datum: str) -> bool:
-    from . import todoist
-
-    try:
-        todoist._request("POST", f"/tasks/{task_id}", json={"due_date": datum})
-        return True
-    except BaseException:
-        return False
-
-
-def _todoist_toevoegen(lijst: str, tekst: str, datum: str = "") -> dict | None:
-    from . import todoist
-
-    try:
-        project = todoist._project(lijst)
-        body = {"content": tekst, "project_id": project["id"]}
-        if datum:
-            body["due_date"] = datum
-        t = todoist._request("POST", "/tasks", json=body)
-        return {"id": str(t["id"]), "tekst": t["content"],
-                "due": ((t.get("due") or {}).get("date") or "")[:10]}
-    except BaseException:
-        return None
-
-
-def _agenda_verzet(event_id: str, start: str, eind: str) -> bool:
-    """Google-afspraak verplaatsen (start/eind als 'YYYY-MM-DDTHH:MM', lokale tijd)."""
-    from . import gcal
-
-    try:
-        svc = gcal._service()
-        svc.events().patch(
-            calendarId=os.environ["GOOGLE_CALENDAR_ID"], eventId=event_id,
-            body={
-                "start": {"dateTime": f"{start}:00", "timeZone": "Europe/Amsterdam"},
-                "end": {"dateTime": f"{eind}:00", "timeZone": "Europe/Amsterdam"},
-            },
-        ).execute()
-        return True
-    except BaseException:
-        log.warning("afspraak verzetten mislukt", exc_info=True)
-        return False
-
-
-def _agenda_bewerk(event_id: str, velden: dict) -> bool:
-    """Google-afspraak bewerken: titel, start/eind (met tijd 'YYYY-MM-DDTHH:MM' of hele dag
-    'YYYY-MM-DD'), locatie, omschrijving. Alleen meegegeven velden worden aangepast."""
-    from . import gcal
-
-    body: dict = {}
-    if "titel" in velden:
-        body["summary"] = velden["titel"]
-    if "start" in velden:
-        s, e = velden["start"], velden["eind"]
-        if "T" in s:
-            body["start"] = {"dateTime": f"{s}:00", "timeZone": "Europe/Amsterdam"}
-            body["end"] = {"dateTime": f"{e}:00", "timeZone": "Europe/Amsterdam"}
-        else:  # hele dag: Google wil een exclusieve einddatum
-            eind = (date.fromisoformat(e) + timedelta(days=1)).isoformat() if e == s else e
-            body["start"], body["end"] = {"date": s}, {"date": eind}
-    if "locatie" in velden:
-        body["location"] = velden["locatie"]
-    if "omschrijving" in velden:
-        body["description"] = velden["omschrijving"]
-    try:
-        svc = gcal._service()
-        svc.events().patch(calendarId=os.environ["GOOGLE_CALENDAR_ID"], eventId=event_id, body=body).execute()
-        return True
-    except BaseException:
-        log.warning("afspraak bewerken mislukt", exc_info=True)
-        return False
-
-
-def _agenda_nieuw(velden: dict) -> dict | None:
-    """Nieuwe Google-afspraak; geeft {id, start, eind} terug of None."""
-    from . import gcal
-
-    s, e = velden["start"], velden["eind"]
-    if "T" in s:
-        start = {"dateTime": f"{s}:00", "timeZone": "Europe/Amsterdam"}
-        eind = {"dateTime": f"{e}:00", "timeZone": "Europe/Amsterdam"}
-    else:
-        start = {"date": s}
-        eind = {"date": (date.fromisoformat(e) + timedelta(days=1)).isoformat() if e == s else e}
-    body = {"summary": velden["titel"], "start": start, "end": eind,
-            "location": velden.get("locatie", ""), "description": velden.get("omschrijving", "")}
-    try:
-        svc = gcal._service()
-        ev = svc.events().insert(calendarId=os.environ["GOOGLE_CALENDAR_ID"], body=body).execute()
-        return {"id": ev.get("id", ""), "start": s, "eind": e}
-    except BaseException:
-        log.warning("afspraak aanmaken mislukt", exc_info=True)
-        return None
-
-
-def _agenda_verwijder(event_id: str) -> bool:
-    from . import gcal
-
-    try:
-        svc = gcal._service()
-        svc.events().delete(calendarId=os.environ["GOOGLE_CALENDAR_ID"], eventId=event_id).execute()
-        return True
-    except BaseException:
-        log.warning("afspraak verwijderen mislukt", exc_info=True)
-        return False
-
-
-def _regelzaken() -> list[dict]:
-    """Terugkerende regelzaken uit het huishoudhandboek (Google Doc), gesorteerd op
-    'volgende'-datum. Regelformat: • Kapper Evi — wie: Yvette · elke: ~8 weken ·
-    laatst: 15-07-2026 · volgende: ±09-09-2026"""
-    import re
-
-    from . import gdrive
-
-    try:
-        svc = gdrive._service()
-        node = gdrive._resolve(svc, "20 Huishouden/Huishoudhandboek", must_exist=False)
-        if not node:
-            return []
-        text = svc.files().export(fileId=node["id"], mimeType="text/plain").execute()
-        text = text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
-    except BaseException:
-        return []
-
-    def veld(s: str, naam: str) -> str:
-        m = re.search(naam + r"\s*:\s*±?\s*([^·]+)", s, re.I)
-        return m.group(1).strip() if m else ""
-
-    vandaag = date.today()
-    out = []
-    for line in text.splitlines():
-        s = line.strip().lstrip("•-* ").strip()
-        if not s or not re.search(r"\b(volgende|elke)\b", s, re.I):
-            continue
-        naam = re.split(r"\s+[—–-]\s+|\s+·\s+", s)[0].strip()
-        volgende = veld(s, "volgende")
-        dagen = None
-        m = re.search(r"(\d{1,2})-(\d{1,2})-(\d{4})", volgende)
-        if m:
-            try:
-                dagen = (date(int(m.group(3)), int(m.group(2)), int(m.group(1))) - vandaag).days
-            except ValueError:
-                pass
-        out.append({"naam": naam[:60], "wie": veld(s, "wie"), "elke": veld(s, "elke"),
-                    "laatst": veld(s, "laatst"), "volgende": volgende, "dagen": dagen})
-    out.sort(key=lambda z: (z["dagen"] is None, z["dagen"] if z["dagen"] is not None else 0))
-    return out[:30]
-
-
-def _thuis() -> dict | None:
-    """Stand van het huis via Homey; None als niet gekoppeld of even onbereikbaar."""
-    from . import homey
-
-    if not homey.geconfigureerd():
-        return None
-    try:
-        return homey.samenvatting()
-    except BaseException:
-        log.warning("Homey ophalen mislukt", exc_info=True)
-        return None
-
-
-def _verjaardagen() -> list[dict]:
-    from . import gdrive
-
-    try:
-        svc = gdrive._service()
-        node = gdrive._resolve(svc, "20 Huishouden/Verjaardagen", must_exist=False)
-        if not node:
-            return []
-        text = svc.files().export(fileId=node["id"], mimeType="text/plain").execute()
-        text = text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
-    except BaseException:
-        return []
-    vandaag = date.today()
-    out = []
-    for line in text.splitlines():
-        clean = line.strip().lstrip("•-* ").strip()
-        if len(clean) < 6 or not clean[:5].replace("-", "").isdigit():
-            continue
-        try:
-            dd, mm = int(clean[:2]), int(clean[3:5])
-            volgende = date(vandaag.year, mm, dd)
-            if volgende < vandaag:
-                volgende = date(vandaag.year + 1, mm, dd)
-        except ValueError:
-            continue
-        delen = [d.strip(" ·—-") for d in clean[5:].split("·")]
-        out.append({"datum": clean[:5], "naam": delen[0],
-                    "notitie": " · ".join(d for d in delen[1:] if d and d != "—"),
-                    "dagen": (volgende - vandaag).days})
-    return sorted(out, key=lambda x: x["dagen"])[:30]
 
 
 class Dashboard:
@@ -714,11 +144,11 @@ class Dashboard:
         gen = self._gen
         if not self._traag or time.time() - self._traag_ts > CACHE_TTL:
             (week, compleet), jarigen, regelzaken, thuis, onderwerpen = await asyncio.gather(
-                asyncio.to_thread(_agenda_rijk),
-                asyncio.to_thread(_verjaardagen),
-                asyncio.to_thread(_regelzaken),
-                asyncio.to_thread(_thuis),
-                asyncio.to_thread(_onderwerpen),
+                asyncio.to_thread(agenda.rijk),
+                asyncio.to_thread(bronnen.verjaardagen),
+                asyncio.to_thread(bronnen.regelzaken),
+                asyncio.to_thread(bronnen.thuis),
+                asyncio.to_thread(bronnen.onderwerpen),
             )
             if compleet or not self._traag:
                 self._traag = {"week": week, "verjaardagen": jarigen, "regelzaken": regelzaken,
@@ -732,20 +162,20 @@ class Dashboard:
                 self._traag["thuis"] = thuis or self._traag.get("thuis")
                 self._traag["onderwerpen"] = onderwerpen
         boodschappen, acties, boodschappen_af, acties_af = await asyncio.gather(
-            asyncio.to_thread(_todoist_lijst, "boodschappen"),
-            asyncio.to_thread(_todoist_lijst, "acties"),
-            asyncio.to_thread(_todoist_afgevinkt, "boodschappen"),
-            asyncio.to_thread(_todoist_afgevinkt, "acties"),
+            asyncio.to_thread(todoist.lijst, "boodschappen"),
+            asyncio.to_thread(todoist.lijst, "acties"),
+            asyncio.to_thread(todoist.afgevinkt, "boodschappen"),
+            asyncio.to_thread(todoist.afgevinkt, "acties"),
         )
         onderwerpen = self._traag.get("onderwerpen", [])
         vers = {
-            "agenda": _agenda_compact(self._traag["week"]),
+            "agenda": agenda.compact(self._traag["week"]),
             "week": self._traag["week"],
             "personen": self.cfg.dashboard_personen,
             "onderwerpen": onderwerpen,
             "aandacht": {
-                "birdy": _aandacht_birdy(self.cfg.workspace),
-                "signalen": _signalen(acties, self._traag.get("regelzaken", []),
+                "birdy": bronnen.aandacht_birdy(self.cfg.workspace),
+                "signalen": signalen.bereken(acties, self._traag.get("regelzaken", []),
                                       self._traag["verjaardagen"], self._traag["week"], onderwerpen),
             },
             "boodschappen": boodschappen,
@@ -762,10 +192,10 @@ class Dashboard:
         return dict(vers)
 
     async def done(self, request: web.Request) -> web.Response:
-        return await self._taak_actie(request, _todoist_afvinken, self._patch_afgevinkt)
+        return await self._taak_actie(request, todoist.afvinken, self._patch_afgevinkt)
 
     async def reopen(self, request: web.Request) -> web.Response:
-        return await self._taak_actie(request, _todoist_heropen, self._patch_heropend)
+        return await self._taak_actie(request, todoist.heropen, self._patch_heropend)
 
     async def _taak_actie(self, request: web.Request, actie, patch) -> web.Response:
         if not self._authorized(request):
@@ -818,7 +248,7 @@ class Dashboard:
                   and datum.replace("-", "").isdigit())
         if not task_id or len(task_id) > 40 or not geldig:
             return web.json_response({"error": "id of datum ongeldig"}, status=400)
-        ok = await asyncio.to_thread(_todoist_deadline, task_id, datum)
+        ok = await asyncio.to_thread(todoist.deadline, task_id, datum)
         if ok:
             self._gen += 1
             if self._cache:
@@ -852,7 +282,7 @@ class Dashboard:
             events = hit[1]
         else:
             events, compleet = await asyncio.to_thread(
-                _agenda_bereik, datetime.combine(van, datetime.min.time()),
+                agenda.bereik, datetime.combine(van, datetime.min.time()),
                 datetime.combine(tot, datetime.min.time()), zoek)
             if compleet:
                 self._agenda_cache[sleutel] = (nu, events)
@@ -875,7 +305,7 @@ class Dashboard:
         if actie != "nieuw" and (not event_id or len(event_id) > 200):
             return web.json_response({"error": "geen afspraak-id"}, status=400)
         if actie == "verwijder":
-            ok = await asyncio.to_thread(_agenda_verwijder, event_id)
+            ok = await asyncio.to_thread(agenda.verwijder, event_id)
             if ok:
                 self._gen += 1
                 self._cache = None
@@ -907,7 +337,7 @@ class Dashboard:
         if actie == "nieuw":
             if "titel" not in velden or "start" not in velden:
                 return web.json_response({"error": "titel en datum zijn nodig"}, status=400)
-            nieuw = await asyncio.to_thread(_agenda_nieuw, velden)
+            nieuw = await asyncio.to_thread(agenda.nieuw, velden)
             if nieuw:
                 self._gen += 1
                 self._cache = None
@@ -922,7 +352,7 @@ class Dashboard:
                                      status=200 if nieuw else 502)
         if not velden:
             return web.json_response({"error": "niets te wijzigen"}, status=400)
-        ok = await asyncio.to_thread(_agenda_bewerk, event_id, velden)
+        ok = await asyncio.to_thread(agenda.bewerk, event_id, velden)
         if ok:
             self._gen += 1
             self._cache = None
@@ -958,7 +388,7 @@ class Dashboard:
 
         if not event_id or len(event_id) > 200 or not geldig(start) or not geldig(eind):
             return web.json_response({"error": "id of tijd ongeldig"}, status=400)
-        ok = await asyncio.to_thread(_agenda_verzet, event_id, start, eind)
+        ok = await asyncio.to_thread(agenda.verzet, event_id, start, eind)
         if ok:
             self._gen += 1
             self._cache = None  # agenda-compact opnieuw opbouwen (uit gepatchte week)
@@ -987,7 +417,7 @@ class Dashboard:
         except Exception as e:
             fout = "geen rechten (scope 'Apparaten: bedienen' ontbreekt)" if "403" in str(e) else str(e)[:120]
             return web.json_response({"error": fout}, status=502)
-        thuis = await asyncio.to_thread(_thuis)
+        thuis = await asyncio.to_thread(bronnen.thuis)
         if self._traag and thuis:
             self._traag["thuis"] = thuis
         self._cache = None
@@ -1008,7 +438,7 @@ class Dashboard:
             lijst, tekst = "", ""
         if lijst not in ("boodschappen", "acties") or not tekst:
             return web.json_response({"error": "lijst of tekst ontbreekt"}, status=400)
-        taak = await asyncio.to_thread(_todoist_toevoegen, lijst, tekst, datum)
+        taak = await asyncio.to_thread(todoist.toevoegen, lijst, tekst, datum)
         if taak:
             self._gen += 1
             if self._cache:

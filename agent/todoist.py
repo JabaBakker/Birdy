@@ -13,6 +13,7 @@ Vereist in .env: TODOIST_API_TOKEN. Lijstnamen matchen op de projectnaam
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import os
 import sys
 
@@ -129,6 +130,78 @@ def cmd_notitie(query: str, lijst: str | None, tekst: str) -> None:
         sys.exit(f"Meerdere taken lijken op '{query}': {opts}. Wees specifieker.")
     _request("POST", f"/tasks/{matches[0]['id']}", json={"description": tekst})
     print(f"Notitie opgeslagen bij: {matches[0]['content']}")
+
+
+# ── hulpfuncties voor het dashboard (geen CLI) ──
+
+
+def lijst(naam: str) -> list[dict]:
+    try:
+        project = _project(naam)
+        tasks = _list_all("/tasks", {"project_id": project["id"]})
+        out = [{
+            "id": str(t["id"]),
+            "tekst": t["content"],
+            "due": ((t.get("due") or {}).get("date") or "")[:10],
+            "notitie": (t.get("description") or "")[:400],
+        } for t in tasks]
+        out.sort(key=lambda t: (t["due"] == "", t["due"]))  # deadlines eerst, oplopend
+        return out[:50]  # de Vandaag-tab toont de top; de verdiepende pagina alles
+    except BaseException:
+        return []
+
+
+def afvinken(task_id: str) -> bool:
+    try:
+        _request("POST", f"/tasks/{task_id}/close")
+        return True
+    except BaseException:
+        return False
+
+
+def afgevinkt(naam: str) -> list[dict]:
+    """Onlangs afgevinkte taken (7 dagen) van een project, voor de herstel-lijst."""
+    try:
+        project = _project(naam)
+        nu = datetime.now(timezone.utc)
+        data = _request("GET", "/tasks/completed/by_completion_date", params={
+            "project_id": project["id"],
+            "since": (nu - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "until": nu.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+        items = data.get("items") or data.get("results") or []
+        return [{"id": str(t["id"]), "tekst": t["content"]} for t in items][:6]
+    except BaseException:
+        return []
+
+
+def heropen(task_id: str) -> bool:
+    try:
+        _request("POST", f"/tasks/{task_id}/reopen")
+        return True
+    except BaseException:
+        return False
+
+
+def deadline(task_id: str, datum: str) -> bool:
+    try:
+        _request("POST", f"/tasks/{task_id}", json={"due_date": datum})
+        return True
+    except BaseException:
+        return False
+
+
+def toevoegen(lijst: str, tekst: str, datum: str = "") -> dict | None:
+    try:
+        project = _project(lijst)
+        body = {"content": tekst, "project_id": project["id"]}
+        if datum:
+            body["due_date"] = datum
+        t = _request("POST", "/tasks", json=body)
+        return {"id": str(t["id"]), "tekst": t["content"],
+                "due": ((t.get("due") or {}).get("date") or "")[:10]}
+    except BaseException:
+        return None
 
 
 def main() -> None:
