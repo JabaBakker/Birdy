@@ -790,6 +790,9 @@ PAGE = """<!doctype html>
                 transform:translateY(-3px); }
   .pl-seg.bonus { background:rgba(127,191,166,.16) !important; cursor:default;
                   border-style:dashed; border-color:var(--accent); }
+  .pl-seg.pad { background:none; border-color:transparent; cursor:default; min-width:0;
+                color:var(--dim); opacity:.5; font-size:1.1rem; letter-spacing:.3em; }
+  .pl-seg.op { border-color:var(--rood) !important; box-shadow:0 0 0 3px rgba(224,122,106,.25); }
   .pl-rail { position:relative; height:9px; background:var(--panel); border-radius:99px;
              margin:2.1rem .1rem .35rem; border:1px solid var(--lijn); }
   .pl-rail .vul { position:absolute; left:0; top:0; bottom:0; border-radius:99px;
@@ -1609,22 +1612,22 @@ function balkModel(){
   const r = takenVan(PLAN.dagdeel);
   const startD = new Date(PLAN.start);
   const startMin = startD.getHours() * 60 + startD.getMinutes() + startD.getSeconds() / 60;
-  const totaal = Math.max(1, hmNaarMin(PLAN.vertrek) - startMin);  // start → eindtijd, punt
+  const totaal = Math.max(1, hmNaarMin(PLAN.vertrek) - startMin);  // start → eindtijd
   const nu = (Date.now() - PLAN.start) / 60000;
   const actief = plActief();
-  const segs = []; let vorige = 0; let restPlanned = 0;
+  // alles op één tijd-as: [verstreken 🐾][actief: resterend][komend…][bonus]
+  const segs = [{ pad: true, breed: Math.max(nu, 0.05) }];
+  let restPlanned = 0;
   PLAN.gekozen.forEach(i => {
-    const afRec = PLAN.af.find(a => a.i === i);
+    if (PLAN.af.some(a => a.i === i)) return;  // afgerond → zit in de afgelegde weg
     let breed;
-    if (afRec){ breed = Math.max(.7, (afRec.t - PLAN.start) / 60000 - vorige); }
-    else if (i === actief){
-      breed = Math.max(r[i].m, nu - vorige);
-      restPlanned += Math.max(0, r[i].m - (nu - vorige));
-    } else { breed = r[i].m; restPlanned += r[i].m; }
-    segs.push({ i, af: !!afRec, actief: i === actief, breed });
-    vorige += breed;
+    if (i === actief){
+      const inTaak = (Date.now() - plActiefStart()) / 60000;
+      breed = Math.max(0, r[i].m - inTaak);
+    } else { breed = r[i].m; }
+    restPlanned += breed;
+    segs.push({ i, actief: i === actief, breed, op: i === actief && breed <= 0 });
   });
-  // bonus = wat er van de eindtijd overblijft na de resterende kaartjes (live)
   const bonus = Math.max(0, (totaal - nu) - restPlanned);
   segs.push({ bonus: true, breed: Math.max(bonus, 0.01) });
   return { segs, totaal, nu, bonusMin: Math.round(bonus) };
@@ -1641,10 +1644,12 @@ function renderBalk(el, r, kop){
             style="border-color:${KLEUREN[a.i % KLEUREN.length]}">${r[a.i].e}</span>`).join('')
         : `<span class="leeg-plank">hier komen jouw medailles!</span>`) +
     `</div><div class="pl-balkwrap"><div class="pl-balk2" id="plBalk2">` +
-    m.segs.filter(s => !s.af).map(s => s.bonus
+    m.segs.map(s => s.pad
+      ? `<div class="pl-seg pad" id="plSegPad" style="flex:${s.breed} 1 0">🐾</div>`
+      : s.bonus
       ? `<div class="pl-seg bonus" id="plSegBonus" style="flex:${s.breed} 1 0">
            <span class="em2">${BONUS.e}</span><span id="plBonus"></span></div>`
-      : `<div class="pl-seg${s.actief ? ' nu2' : ''}" data-i="${s.i}"
+      : `<div class="pl-seg${s.actief ? ' nu2' : ''}${s.op ? ' op' : ''}" data-i="${s.i}"
            style="flex:${s.breed} 1 0;background:${KLEUREN[s.i % KLEUREN.length]}26"
            onclick="plVier(event, ${s.i})">
            <span class="em2">${r[s.i].e}</span>
@@ -1707,11 +1712,12 @@ function plTick(){
   if (PLAN.versie === 'balk'){
     const m = balkModel();
     m.segs.forEach(s => {
-      const el = s.bonus ? document.getElementById('plSegBonus')
+      const el = s.pad ? document.getElementById('plSegPad')
+        : s.bonus ? document.getElementById('plSegBonus')
         : document.querySelector(`.pl-seg[data-i="${s.i}"]`);
       if (!el) return;
-      if (!s.af) el.style.flexGrow = s.breed;
-      if (!s.bonus) el.classList.toggle('nu2', !!s.actief);
+      el.style.flexGrow = s.breed;
+      if (!s.bonus && !s.pad){ el.classList.toggle('nu2', !!s.actief); el.classList.toggle('op', !!s.op); }
     });
     const pct = Math.min(99.3, Math.max(0.7, m.nu / m.totaal * 100)) + '%';
     const vul = document.getElementById('plRailVul');
