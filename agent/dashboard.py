@@ -890,7 +890,8 @@ PAGE = """<!doctype html>
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,sans-serif;
          padding:1.1rem; min-height:100vh; font-size:15px; }
-  header { display:flex; align-items:center; gap:1.2rem; margin-bottom:.85rem; }
+  header { display:flex; align-items:center; gap:.9rem; margin-bottom:.85rem; flex-wrap:wrap; }
+  @media (max-width:900px){ #tekstinvoer { order:9; flex-basis:100%; max-width:none; margin:0; } }
   header h1 { font-size:1.3rem; display:flex; align-items:center; gap:.5rem; }
   header h1 span { color:var(--accent); }
   header img { height:2.1rem; }
@@ -898,11 +899,12 @@ PAGE = """<!doctype html>
   #tabs button { border:none; background:none; color:var(--dim); font-size:.92rem; cursor:pointer;
                  padding:.4rem 1rem; border-radius:99px; }
   #tabs button.actief { background:var(--accent); color:#14171a; font-weight:600; }
-  #klok { color:var(--dim); font-size:1rem; text-transform:capitalize; margin-left:auto; }
-  #tekstinvoer { display:flex; gap:.5rem; margin-bottom:1rem; }
-  #tekstinvoer input { flex:1; background:var(--panel); border:1px solid #333a41; border-radius:12px;
-                       color:var(--ink); padding:.75rem 1rem; font-size:1rem; }
-  #tekstinvoer button { border:none; border-radius:12px; padding:0 1.1rem; font-size:1.2rem;
+  #klok { color:var(--dim); font-size:.95rem; text-transform:capitalize; margin-left:auto; white-space:nowrap; }
+  /* praat-/typbalk in de kopregel (bespaart een rij op het bord) */
+  #tekstinvoer { display:flex; gap:.4rem; flex:1; min-width:220px; max-width:720px; margin:0 .4rem; }
+  #tekstinvoer input { flex:1; min-width:0; background:var(--panel); border:1px solid #333a41; border-radius:12px;
+                       color:var(--ink); padding:.55rem .9rem; font-size:.95rem; }
+  #tekstinvoer button { border:none; border-radius:12px; padding:0 .85rem; font-size:1.1rem;
                         cursor:pointer; }
   #stuurknop { background:var(--accent); color:#14171a; }
   .micknop { background:var(--panel); border:1px solid #333a41 !important; }
@@ -1328,13 +1330,13 @@ PAGE = """<!doctype html>
       <button id="tabWeek" onclick="kiesTab('week')">Week</button>
       <button id="tabPlan" onclick="kiesTab('plan')">Planning</button>
     </div>
+    <div id="tekstinvoer">
+      <input id="invoer" placeholder="Zeg of typ iets tegen Birdy — “voeg kwark toe aan de boodschappen”">
+      <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
+      <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
+    </div>
     <div id="klok"></div>
   </header>
-  <div id="tekstinvoer">
-    <input id="invoer" placeholder="Zeg of typ iets tegen Birdy — “voeg kwark toe aan de boodschappen”">
-    <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
-    <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
-  </div>
   <div class="lay" id="paneelVandaag">
     <aside class="zijbalk">
       <div class="mini" onclick="openL2('onderwerpen')">
