@@ -75,9 +75,10 @@ De gedeelde agenda van Jaap en Yvette is gekoppeld. Gebruik hem via de Bash-tool
 - Afspraak met tijd: `python /app/agent/gcal.py add "Titel" --start "2026-08-21 14:00" --duur 60`
 - Hele dag: `python /app/agent/gcal.py add "Titel" --dag 2026-08-21`
 
-`list` toont álle gekoppelde bronnen samen: de Google-gezinsagenda én afspraken die het
-gezin in FamilyWall zet (gemarkeerd met "(FamilyWall)" — die zijn alleen-lezen; toevoegen
-kan alleen in de Google-agenda).
+`list` toont álle gekoppelde bronnen samen: de Google-gezinsagenda én alleen-lezen
+feeds zoals FamilyWall en sportprogramma's (gemarkeerd met het label van de bron, bijv.
+"(FamilyWall)" of "(Volleybal DS3)"). Toevoegen of verzetten kan alleen in de
+Google-agenda; wedstrijden en FamilyWall-afspraken neem je gewoon mee in je planning.
 
 **Tijden komen alléén uit de agenda-uitvoer van déze cyclus.** Noem je ergens een tijd
 of een overlap, haal hem dan uit `gcal.py list` van nu — nooit uit `TAKEN.md`,

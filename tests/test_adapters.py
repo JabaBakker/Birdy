@@ -294,6 +294,26 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_tijdvak("2026-09-06T11:00:00Z", "2026-09-06T14:00:00Z"), "2026-09-06 13:00–16:00")
         self.assertEqual(_tijdvak("2026-09-07", None), "2026-09-07")
 
+    def test_ics_feeds(self):
+        import os
+        from agent.gcal import ics_feeds
+        oud = {k: os.environ.get(k) for k in ("FAMILYWALL_ICS_URL", "AGENDA_ICS_FEEDS")}
+        try:
+            os.environ["FAMILYWALL_ICS_URL"] = "https://fw.example/x.ics"
+            os.environ["AGENDA_ICS_FEEDS"] = "Volleybal DS3|http://api.nevobo.nl/a.ics; https://school.example/k.ics ;"
+            self.assertEqual(ics_feeds(), [("FamilyWall", "https://fw.example/x.ics"),
+                                           ("Volleybal DS3", "http://api.nevobo.nl/a.ics"),
+                                           ("school.example", "https://school.example/k.ics")])
+            os.environ["FAMILYWALL_ICS_URL"] = ""
+            os.environ["AGENDA_ICS_FEEDS"] = ""
+            self.assertEqual(ics_feeds(), [])
+        finally:
+            for k, v in oud.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
     def test_dubbelingen(self):
         from agent.dashboard import _dubbelingen
         acties = [{"tekst": "Cadeau kopen voor Evi's verjaardag"},

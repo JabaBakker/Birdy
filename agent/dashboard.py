@@ -44,7 +44,7 @@ def _agenda_bereik(van: datetime, tot: datetime, zoek: str = "") -> tuple[list[d
     houdt de cache liever de vorige complete versie vast."""
     events: list[dict] = []
     google_ok = not os.environ.get("GOOGLE_CALENDAR_ID")
-    fw_ok = not os.environ.get("FAMILYWALL_ICS_URL")
+    fw_ok = True
     zoek = zoek.strip().lower()
     try:
         from . import gcal
@@ -83,43 +83,46 @@ def _agenda_bereik(van: datetime, tot: datetime, zoek: str = "") -> tuple[list[d
             google_ok = True
     except BaseException:  # SystemExit van de CLI-helpers telt ook
         log.warning("Google-agenda ophalen mislukt", exc_info=True)
-    try:
-        url = os.environ.get("FAMILYWALL_ICS_URL", "")
-        if url:
-            import icalendar
-            import recurring_ical_events
-            import requests
+    from . import gcal
 
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            cal = icalendar.Calendar.from_ical(resp.content)
+    feeds = gcal.ics_feeds()
+    fw_ok = not feeds
+    if feeds:
+        import icalendar
+        import recurring_ical_events
+        import requests
 
-            from . import gcal
+        def iso(v) -> str:
+            if isinstance(v, datetime):
+                return gcal._lokaal(v).strftime("%Y-%m-%dT%H:%M")
+            return v.strftime("%Y-%m-%d") if v else ""
 
-            def iso(v) -> str:
-                if isinstance(v, datetime):
-                    return gcal._lokaal(v).strftime("%Y-%m-%dT%H:%M")
-                return v.strftime("%Y-%m-%d") if v else ""
-
-            for ev in recurring_ical_events.of(cal).between(van, tot):
-                start = ev.get("DTSTART").dt
-                eind = ev.get("DTEND")
-                if zoek and zoek not in " ".join(str(ev.get(k, "")) for k in
-                                                 ("SUMMARY", "DESCRIPTION", "LOCATION")).lower():
-                    continue
-                events.append({
-                    "id": "",  # alleen-lezen: FamilyWall-afspraken kunnen niet verzet worden
-                    "start": iso(start),
-                    "eind": iso(eind.dt if eind else None) or iso(start),
-                    "titel": str(ev.get("SUMMARY", "(zonder titel)")),
-                    "omschrijving": str(ev.get("DESCRIPTION", ""))[:600],
-                    "locatie": str(ev.get("LOCATION", "")),
-                    "wie": "",
-                    "bron": "FamilyWall",
-                })
-            fw_ok = True
-    except BaseException:
-        log.warning("FamilyWall ophalen mislukt", exc_info=True)
+        alle_ok = True
+        for label, url in feeds:
+            try:
+                resp = requests.get(url, timeout=30)
+                resp.raise_for_status()
+                cal = icalendar.Calendar.from_ical(resp.content)
+                for ev in recurring_ical_events.of(cal).between(van, tot):
+                    start = ev.get("DTSTART").dt
+                    eind = ev.get("DTEND")
+                    if zoek and zoek not in " ".join(str(ev.get(k, "")) for k in
+                                                     ("SUMMARY", "DESCRIPTION", "LOCATION")).lower():
+                        continue
+                    events.append({
+                        "id": "",  # alleen-lezen: iCal-afspraken kunnen niet verzet worden
+                        "start": iso(start),
+                        "eind": iso(eind.dt if eind else None) or iso(start),
+                        "titel": str(ev.get("SUMMARY", "(zonder titel)")),
+                        "omschrijving": str(ev.get("DESCRIPTION", ""))[:600],
+                        "locatie": str(ev.get("LOCATION", "")),
+                        "wie": "",
+                        "bron": label,
+                    })
+            except BaseException:
+                alle_ok = False
+                log.warning("iCal-feed %s ophalen mislukt", label, exc_info=True)
+        fw_ok = alle_ok
     # zelfde moment + titel uit beide bronnen → één keer
     seen, uniek = set(), []
     for ev in sorted(events, key=lambda e: e["start"]):
@@ -1605,10 +1608,10 @@ function renderL2(){
       html += '<ul>' + z.items.map((e, i) => {
         const dag = e.start.slice(0,10), voorbij = dag < vandaag;
         const tijd = e.start.length > 10 ? e.start.slice(11,16) + ((e.eind && e.eind.length > 10) ? '–' + e.eind.slice(11,16) : '') : 'hele dag';
-        const k = kleurVoor(e.titel);
+        const k = kleurVoor(e.titel, e.bron);
         return `<li class="signaal" style="${voorbij ? 'opacity:.55' : ''}" onclick='gaNaar(ZOEK.items[${i}])'>` +
           `<small style="flex:0 0 7.5rem">${esc(new Date(dag + 'T00:00').toLocaleDateString('nl-NL', { weekday:'short', day:'numeric', month:'short', year: dag.slice(0,4) !== vandaag.slice(0,4) ? 'numeric' : undefined }))}</small>` +
-          `<span><b style="color:${k}">${esc(e.titel)}</b> <span class="notitie">· ${tijd}${e.locatie ? ' · ' + esc(e.locatie) : ''}${e.bron === 'FamilyWall' ? ' · FamilyWall' : ''}</span></span></li>`;
+          `<span><b style="color:${k}">${esc(e.titel)}</b> <span class="notitie">· ${tijd}${e.locatie ? ' · ' + esc(e.locatie) : ''}${e.bron && !e.bron.startsWith('Gezinsagenda') ? ' · ' + esc(e.bron) : ''}</span></span></li>`;
       }).join('') + '</ul>';
     }
   } else if (L2open === 'aandacht'){
@@ -1679,8 +1682,9 @@ function persoonMatch(tekst){
       return { naam: PERSONEN[i], kleur: KLEUREN[i % KLEUREN.length] };
   return null;
 }
-function kleurVoor(titel){
-  const p = persoonMatch(titel);
+function kleurVoor(titel, bron){
+  // een persoonsnaam in de titel of in het bronlabel ("Volleybal Yvette") bepaalt de kleur
+  const p = persoonMatch(titel) || (bron && !bron.startsWith('Gezinsagenda') ? persoonMatch(bron) : null);
   return p ? p.kleur : '#5b6570';
 }
 function persChip(tekst){
@@ -1773,7 +1777,7 @@ function bouwWeek(events, start){
   volgorde.forEach(key => {
     const g = dagen[key];
     html += `<div class="heledag">` + g.heledag.map(e => {
-      const k = kleurVoor(e.titel);
+      const k = kleurVoor(e.titel, e.bron);
       return `<div class="chip" style="border-color:${k};background:${k}22"` +
         ` onclick="detailEv(${e._i})">${esc(e.titel)}</div>`;
     }).join('') + `</div>`;
@@ -1810,7 +1814,7 @@ function bouwWeek(events, start){
     t.forEach(x => {
       const top = Math.max(0, (x.s/60 - U0) * PPU);
       const hoogte = Math.max(24, Math.min(HOOG - top - 2, (x.e - x.s) / 60 * PPU - 2));
-      const k = kleurVoor(x.ev.titel);
+      const k = kleurVoor(x.ev.titel, x.ev.bron);
       const breedte = 100 / x.cols;
       const tijd = x.ev.start.slice(11,16) +
         ((x.ev.eind && x.ev.eind.length > 10) ? '–' + x.ev.eind.slice(11,16) : '');

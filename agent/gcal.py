@@ -92,34 +92,55 @@ def _google_events(days: int) -> list[tuple[str, str]]:
     return out
 
 
-def _familywall_events(days: int) -> list[tuple[str, str]]:
-    """(sorteersleutel, regel) uit de FamilyWall iCal-leeslink. Leeg als niet ingesteld."""
-    url = os.environ.get("FAMILYWALL_ICS_URL", "")
-    if not url:
+def ics_feeds() -> list[tuple[str, str]]:
+    """Alleen-lezen iCal-bronnen naast de Google-agenda: [(label, url), …].
+    AGENDA_ICS_FEEDS="Label|https://…;Ander label|https://…" plus (oud) FAMILYWALL_ICS_URL
+    als bron "FamilyWall". Staat er een persoonsnaam in het label ("Volleybal Yvette"),
+    dan kleurt het dashboard die afspraken als van die persoon."""
+    feeds: list[tuple[str, str]] = []
+    fw = os.environ.get("FAMILYWALL_ICS_URL", "").strip()
+    if fw:
+        feeds.append(("FamilyWall", fw))
+    for item in os.environ.get("AGENDA_ICS_FEEDS", "").split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        label, _, url = item.partition("|")
+        if not url.strip():  # alleen een url → label uit de hostnaam
+            label, url = url or label, label
+            label = label.split("//")[-1].split("/")[0]
+        feeds.append((label.strip(), url.strip()))
+    return feeds
+
+
+def _ics_events(days: int) -> list[tuple[str, str]]:
+    """(sorteersleutel, regel) uit alle iCal-feeds; elke regel eindigt op '(label)'."""
+    feeds = ics_feeds()
+    if not feeds:
         return []
     import requests
     import icalendar
     import recurring_ical_events
 
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
-    cal = icalendar.Calendar.from_ical(resp.content)
     now = datetime.now()
-    events = recurring_ical_events.of(cal).between(now, now + timedelta(days=days))
     out = []
-    for ev in events:
-        start = ev.get("DTSTART").dt
-        eind = ev.get("DTEND")
-        when = _tijdvak(start, eind.dt if eind and isinstance(start, datetime) else None)
-        title = str(ev.get("SUMMARY", "(zonder titel)"))
-        out.append((when[:16], f"{when} | {title} (FamilyWall)"))
+    for label, url in feeds:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        cal = icalendar.Calendar.from_ical(resp.content)
+        for ev in recurring_ical_events.of(cal).between(now, now + timedelta(days=days)):
+            start = ev.get("DTSTART").dt
+            eind = ev.get("DTEND")
+            when = _tijdvak(start, eind.dt if eind and isinstance(start, datetime) else None)
+            title = str(ev.get("SUMMARY", "(zonder titel)"))
+            out.append((when[:16], f"{when} | {title} ({label})"))
     return out
 
 
 def cmd_list(days: int) -> None:
     rows: list[tuple[str, str]] = []
     errors: list[str] = []
-    for source, fn in (("Google-agenda", _google_events), ("FamilyWall", _familywall_events)):
+    for source, fn in (("Google-agenda", _google_events), ("iCal-feeds", _ics_events)):
         try:
             rows.extend(fn(days))
         except SystemExit as e:
@@ -127,11 +148,14 @@ def cmd_list(days: int) -> None:
         except Exception as e:
             errors.append(f"{source}: {type(e).__name__}: {e}")
     seen = set()
+    labels = [f" ({label})" for label, _ in ics_feeds()]
     if rows:
         print(f"Tijden zijn Nederlandse tijd ({TZ}), begin–eind. Dit is de enige betrouwbare bron voor tijden.")
     for _, line in sorted(rows):
-        # zelfde moment + titel uit beide bronnen → één keer tonen
-        norm = line.replace(" (FamilyWall)", "")
+        # zelfde moment + titel uit meerdere bronnen → één keer tonen
+        norm = line
+        for suffix in labels:
+            norm = norm.replace(suffix, "")
         if norm in seen:
             continue
         seen.add(norm)
