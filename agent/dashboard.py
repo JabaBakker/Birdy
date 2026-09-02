@@ -287,8 +287,11 @@ def _signalen(acties: list[dict], regelzaken: list[dict], verjaardagen: list[dic
     for j in verjaardagen:
         if j.get("dagen") is not None and 0 <= j["dagen"] <= 7 and not (j.get("notitie") or "").strip():
             wanneer = "vandaag" if j["dagen"] == 0 else "morgen" if j["dagen"] == 1 else f"over {j['dagen']} dagen"
+            naam = j["naam"].split("(")[0].strip()
             out.append({"tekst": f"🎂 {j['naam']} {wanneer}, nog geen cadeau-idee",
-                        "l2": "verjaardagen", "ernst": 1 if j["dagen"] > 1 else 0})
+                        "l2": "verjaardagen", "ernst": 1 if j["dagen"] > 1 else 0,
+                        "knop": {"label": "Cadeau-actie toevoegen", "tekst": f"Cadeau voor {naam}",
+                                 "datum": (vandaag + timedelta(days=max(0, j["dagen"] - 1))).isoformat()}})
 
     # overlappende afspraken met tijd, vandaag en morgen
     morgen_s = (vandaag + timedelta(days=1)).isoformat()
@@ -418,12 +421,15 @@ def _todoist_deadline(task_id: str, datum: str) -> bool:
         return False
 
 
-def _todoist_toevoegen(lijst: str, tekst: str) -> dict | None:
+def _todoist_toevoegen(lijst: str, tekst: str, datum: str = "") -> dict | None:
     from . import todoist
 
     try:
         project = todoist._project(lijst)
-        t = todoist._request("POST", "/tasks", json={"content": tekst, "project_id": project["id"]})
+        body = {"content": tekst, "project_id": project["id"]}
+        if datum:
+            body["due_date"] = datum
+        t = todoist._request("POST", "/tasks", json=body)
         return {"id": str(t["id"]), "tekst": t["content"],
                 "due": ((t.get("due") or {}).get("date") or "")[:10]}
     except BaseException:
@@ -831,11 +837,14 @@ class Dashboard:
             body = await request.json()
             lijst = str(body.get("lijst", "")).strip().lower()
             tekst = str(body.get("tekst", "")).strip()[:200]
+            datum = str(body.get("datum", "") or "").strip()[:10]
+            if datum and not (len(datum) == 10 and datum[4] == datum[7] == "-" and datum.replace("-", "").isdigit()):
+                datum = ""
         except Exception:
             lijst, tekst = "", ""
         if lijst not in ("boodschappen", "acties") or not tekst:
             return web.json_response({"error": "lijst of tekst ontbreekt"}, status=400)
-        taak = await asyncio.to_thread(_todoist_toevoegen, lijst, tekst)
+        taak = await asyncio.to_thread(_todoist_toevoegen, lijst, tekst, datum)
         if taak:
             self._gen += 1
             if self._cache:
@@ -902,31 +911,78 @@ PAGE = """<!doctype html>
   .grid { display:grid; gap:.9rem; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
           align-items:start; }
   .kolom { display:flex; flex-direction:column; gap:.9rem; }
-  .panel { background:var(--panel); border-radius:14px; padding:.9rem 1rem; }
-  .panel h2 { font-size:.76rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent);
-              margin-bottom:.55rem; }
-  .panel h2.klik { cursor:pointer; }
+  /* ── kaarten: één stijl voor zijbalk en hoofdvlak ── */
+  .panel { background:var(--panel); border:1px solid var(--lijn); border-radius:16px; padding:.85rem 1rem 1rem; }
+  .kaartkop { display:flex; align-items:center; gap:.55rem; margin-bottom:.6rem; cursor:pointer; }
+  .kaartkop .ico { font-size:1.05rem; width:1.7rem; height:1.7rem; display:flex; align-items:center;
+                   justify-content:center; border-radius:9px; background:rgba(127,191,166,.12); }
+  .kaartkop h2, .kaartkop h3 { font-size:1.02rem; font-weight:650; letter-spacing:0; text-transform:none;
+                               color:var(--ink); margin:0; }
+  .kaartkop b { background:rgba(255,255,255,.08); color:var(--ink); border-radius:99px; padding:.02rem .55rem;
+                font-size:.74rem; font-weight:600; }
+  .kaartkop b:empty { display:none; }
+  .kaartkop i { margin-left:auto; color:var(--dim); font-style:normal; font-size:1.1rem; }
   .panel ul { list-style:none; padding:0; }
   .panel li { padding:.24rem 0; font-size:.95rem; line-height:1.35; display:flex; gap:.5rem;
               align-items:baseline; }
   .panel li small { color:var(--dim); font-variant-numeric:tabular-nums; flex:0 0 3.1rem; }
   .panel li span { flex:1; min-width:0; }
-  li.dag { font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; color:var(--amber);
-           border-top:1px solid var(--lijn); margin-top:.45rem; padding-top:.5rem; }
-  li.dag:first-child { border-top:none; margin-top:0; padding-top:0; }
   li.urgent::before { content:"● "; color:var(--rood); }
   li.week::before { content:"● "; color:var(--amber); }
   .rest { color:var(--dim); font-size:.85rem; margin-top:.45rem; }
-  /* aandacht: Birdy's eigen punten herkenbaar (vogeltje + warme tint), regels gewoon */
-  li.birdy { background:rgba(217,164,78,.11); border-left:3px solid var(--amber); border-radius:8px;
-             padding:.38rem .55rem; margin:.12rem 0; align-items:flex-start; }
+  /* agenda als tijdlijn */
+  ul.tl { position:relative; padding-left:.9rem !important; }
+  ul.tl::before { content:""; position:absolute; left:.22rem; top:.5rem; bottom:.4rem; width:2px;
+                  background:rgba(127,191,166,.28); border-radius:2px; }
+  ul.tl li.dag { position:relative; font-size:.9rem; letter-spacing:0; text-transform:none; color:var(--ink);
+                 font-weight:650; border:none; margin-top:.55rem; padding:.1rem 0 .25rem; }
+  ul.tl li.dag:first-child { margin-top:0; }
+  ul.tl li.dag::before { content:""; position:absolute; left:-.9rem; top:.42rem; width:.62rem; height:.62rem;
+                         border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px var(--panel); }
+  ul.tl li.dag small { flex:0 0 auto; margin-left:.3rem; font-weight:400; }
+  ul.tl li.ev { padding:.14rem 0; align-items:center; gap:.55rem; }
+  ul.tl li.ev small { flex:0 0 2.9rem; font-size:.82rem; }
+  ul.tl li.ev .evpil { display:flex; align-items:center; gap:.45rem; background:rgba(255,255,255,.045);
+                       border-radius:9px; padding:.3rem .55rem; font-size:.9rem; min-width:0; }
+  ul.tl li.ev .evpil em { font-style:normal; flex:0 0 auto; }
+  ul.tl li.ev .evpil span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* aandacht als kaartjes */
+  .akaart { border-left:3px solid var(--kl,var(--amber)); background:rgba(255,255,255,.035); border-radius:10px;
+            padding:.5rem .7rem .55rem; margin:0 0 .45rem; cursor:pointer; }
+  .akaart:active { background:rgba(255,255,255,.07); }
+  .akop { display:flex; align-items:center; gap:.4rem; font-size:.72rem; letter-spacing:.04em;
+          text-transform:uppercase; color:var(--kl,var(--amber)); font-weight:700; margin-bottom:.2rem; }
+  .akop small { margin-left:auto; color:var(--dim); text-transform:none; letter-spacing:0; font-weight:400; }
+  .atekst { font-size:.93rem; line-height:1.4; }
+  .aknop { margin-top:.45rem; border:1px solid var(--lijn); background:rgba(255,255,255,.04); color:var(--ink);
+           border-radius:8px; padding:.32rem .7rem; font-size:.84rem; cursor:pointer; }
+  .aknop:active { border-color:var(--accent); }
   img.bird { width:1.15rem; height:1.15rem; flex:0 0 auto; vertical-align:-.2rem; }
-  li.birdy img.bird { margin-top:.1rem; }
+  .akop img.bird { width:1rem; height:1rem; }
   li.signaal { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.28rem .4rem; }
   li.signaal:active { background:rgba(127,191,166,.12); }
   li.signaal.ernst0 span::before { content:"● "; color:var(--rood); }
   li.signaal.ernst1 span::before { content:"● "; color:var(--amber); }
+  li.birdy { background:rgba(217,164,78,.11); border-left:3px solid var(--amber); border-radius:8px;
+             padding:.38rem .55rem; margin:.12rem 0; align-items:flex-start; }
   .rest .bird { width:.9rem; height:.9rem; vertical-align:-.15rem; margin-right:.2rem; }
+  /* acties: voortgangsring + groepen + initialen */
+  .ringwrap { display:flex; align-items:center; gap:.8rem; margin:0 0 .6rem; }
+  .ring { width:58px; height:58px; flex:0 0 auto; }
+  .ring circle { fill:none; stroke-width:5; }
+  .ring .spoor { stroke:rgba(255,255,255,.08); }
+  .ring .vol { stroke:var(--accent); stroke-linecap:round; transform:rotate(-90deg); transform-origin:50% 50%;
+               transition:stroke-dasharray .6s ease; }
+  .ring text { fill:var(--ink); font-size:15px; font-weight:700; text-anchor:middle; }
+  .ringtekst b { display:block; font-size:.95rem; }
+  .ringtekst small { color:var(--dim); font-size:.82rem; }
+  .groep { display:flex; align-items:center; gap:.45rem; font-size:.78rem; font-weight:700; color:var(--dim);
+           margin:.55rem 0 .15rem; letter-spacing:.03em; }
+  .groep b { background:rgba(255,255,255,.08); border-radius:99px; padding:0 .45rem; font-size:.7rem; }
+  .groep:first-child { margin-top:0; }
+  .init { flex:0 0 auto; width:1.35rem; height:1.35rem; border-radius:50%; display:inline-flex; align-items:center;
+          justify-content:center; font-size:.68rem; font-weight:700; color:#14171a; font-style:normal;
+          align-self:center; }
   li.vink { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.3rem .4rem; }
   li.vink:active { background:rgba(127,191,166,.12); }
   li.vink::before { content:"◯"; color:var(--pc, var(--accent)); font-size:.9rem; }
@@ -938,6 +994,7 @@ PAGE = """<!doctype html>
   .toevoeg input::placeholder { color:var(--dim); }
   .due { display:inline-block; font-size:.66rem; padding:.05rem .42rem; margin-left:.4rem;
          border-radius:99px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  li.vink > span + span .due, li.vink > i + span .due { margin-left:0; font-size:.7rem; padding:.12rem .5rem; }
   .due.laat { background:rgba(224,122,106,.16); color:var(--rood); font-weight:600; }
   .due.nu { background:rgba(217,164,78,.16); color:var(--amber); font-weight:600; }
   .due.straks { border:1px solid var(--lijn); color:var(--dim); }
@@ -1034,14 +1091,12 @@ PAGE = """<!doctype html>
   #paneelVandaag.lay { display:grid; grid-template-columns:238px 1fr; gap:.9rem;
                        align-items:start; }
   .zijbalk { display:flex; flex-direction:column; gap:.65rem; }
-  .mini { background:var(--panel); border-radius:12px; padding:.7rem .85rem; cursor:pointer;
-          border:1px solid transparent; }
+  .mini { background:var(--panel); border-radius:16px; padding:.7rem .85rem .75rem; cursor:pointer;
+          border:1px solid var(--lijn); }
   .mini:hover, .mini:active { border-color:var(--accent); }
-  .mini h3 { font-size:.72rem; letter-spacing:.09em; text-transform:uppercase;
-             color:var(--accent); display:flex; align-items:center; gap:.4rem;
-             margin-bottom:.35rem; }
-  .mini h3 b { margin-left:auto; background:rgba(127,191,166,.18); color:var(--accent);
-               border-radius:99px; padding:0 .5rem; font-size:.7rem; }
+  .mini .kaartkop { margin-bottom:.35rem; gap:.45rem; }
+  .mini .kaartkop h3 { font-size:.95rem; }
+  .mini .kaartkop .ico { width:1.5rem; height:1.5rem; font-size:.95rem; }
   .mini ul { list-style:none; padding:0; }
   .mini li { font-size:.86rem; padding:.13rem 0; display:flex; gap:.4rem; align-items:baseline; }
   .mini li span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -1283,21 +1338,23 @@ PAGE = """<!doctype html>
   <div class="lay" id="paneelVandaag">
     <aside class="zijbalk">
       <div class="mini" onclick="openL2('onderwerpen')">
-        <h3>📂 Onderwerpen <b id="moCount"></b></h3><ul id="moList"></ul></div>
+        <div class="kaartkop"><span class="ico">📂</span><h3>Onderwerpen</h3><b id="moCount"></b><i>›</i></div><ul id="moList"></ul></div>
       <div class="mini" onclick="openL2('boodschappen')">
-        <h3>🛒 Boodschappen <b id="mbCount"></b></h3><ul id="mbList"></ul></div>
+        <div class="kaartkop"><span class="ico">🛒</span><h3>Boodschappen</h3><b id="mbCount"></b><i>›</i></div><ul id="mbList"></ul></div>
       <div class="mini" onclick="openL2('verjaardagen')">
-        <h3>🎂 Verjaardagen</h3><ul id="mvList"></ul></div>
+        <div class="kaartkop"><span class="ico">🎂</span><h3>Verjaardagen</h3><b id="mvCount"></b><i>›</i></div><ul id="mvList"></ul></div>
       <div class="mini" onclick="openL2('regelzaken')">
-        <h3>🔁 Regelzaken</h3><ul id="mrList"></ul></div>
+        <div class="kaartkop"><span class="ico">🔁</span><h3>Regelzaken</h3><b id="mrCount"></b><i>›</i></div><ul id="mrList"></ul></div>
       <div class="mini" id="miniThuis" style="display:none" onclick="openL2('thuis')">
-        <h3>🏠 Thuis</h3><ul id="mtList"></ul></div>
+        <div class="kaartkop"><span class="ico">🏠</span><h3>Thuis</h3><i>›</i></div><ul id="mtList"></ul></div>
     </aside>
     <div class="hoofd">
-      <div class="panel"><h2 class="klik" onclick="kiesTab('week')" title="Naar weekoverzicht">📅 Agenda ↗</h2><ul id="agenda"></ul></div>
-      <div class="panel aandacht"><h2 class="klik" onclick="openL2('aandacht')">💡 Aandacht ↗</h2><ul id="aandacht"></ul><div class="rest" id="aandachtrest"></div></div>
-      <div class="panel"><h2 class="klik" onclick="openL2('acties')">⚡ Acties ↗</h2><ul id="acties"></ul>
-        <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
+      <div class="panel"><div class="kaartkop" onclick="kiesTab('week')" title="Naar weekoverzicht"><span class="ico">📅</span><h2>Agenda</h2><i>⤢</i></div><ul id="agenda" class="tl"></ul></div>
+      <div class="panel aandacht"><div class="kaartkop" onclick="openL2('aandacht')"><span class="ico">💡</span><h2>Aandacht</h2><b id="aaCount"></b><i>⤢</i></div><div id="aandacht"></div><div class="rest" id="aandachtrest"></div></div>
+      <div class="panel"><div class="kaartkop" onclick="openL2('acties')"><span class="ico">⚡</span><h2>Acties</h2><i>⤢</i></div>
+        <div class="ringwrap"><svg class="ring" viewBox="0 0 60 60"><circle class="spoor" cx="30" cy="30" r="25"/><circle class="vol" id="ringVol" cx="30" cy="30" r="25"/><text x="30" y="35" id="ringGetal">0</text></svg><div class="ringtekst" id="ringTekst"></div></div>
+        <div id="acties"></div>
+        <div class="toevoeg"><input placeholder="+ nieuwe actie…" enterkeyhint="done"
           onkeydown="voegToe(event,'acties',this)"></div>
         <details class="af" id="actiesAfWrap"><summary>onlangs afgevinkt</summary>
           <ul id="actiesAf"></ul></details></div>
@@ -1402,10 +1459,82 @@ function vulMeer(id, items, maak, max, l2){
 function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function taakRij(x){
   const p = persoonMatch(x.tekst);
+  // tekst links; rechts vast: initiaal van de persoon, datum-pil of '+' om een datum te prikken
   return `<li class="vink"${p ? ` style="--pc:${p.kleur}"` : ''} onclick="vink(this,'${x.id}')">` +
-    `<span>${esc(x.tekst)}${dueBadge(x.due)}</span>` +
-    (x.due ? '' : `<button class="duebtn" title="deadline prikken"` +
+    `<span>${esc(x.tekst)}</span>` +
+    (p ? `<i class="init" style="background:${p.kleur}" title="${esc(p.naam)}">${esc(p.naam[0])}</i>` : '') +
+    (x.due ? `<span style="flex:0 0 auto;align-self:center">${dueBadge(x.due).replace('margin-left:.4rem', '')}</span>`
+           : `<button class="duebtn" title="deadline prikken"` +
       ` onclick="event.stopPropagation();kiesDatum('${x.id}')">+</button>`) + `</li>`;
+}
+function actiesGroepen(items, max){
+  // Nu (over datum of vandaag) · Binnenkort (binnen 7 dagen) · Later (rest of zonder datum)
+  const nu = new Date(); nu.setHours(0,0,0,0);
+  const dag = d => Math.round((new Date(d + 'T00:00') - nu) / 86400000);
+  const g = { nu: [], binnenkort: [], later: [] };
+  items.forEach(x => {
+    if (!x.due) g.later.push(x);
+    else { const d = dag(x.due); (d <= 0 ? g.nu : d <= 7 ? g.binnenkort : g.later).push(x); }
+  });
+  let html = '', n = 0, over = 0;
+  [['nu', 'Nu'], ['binnenkort', 'Binnenkort'], ['later', 'Later']].forEach(([k, label]) => {
+    if (!g[k].length) return;
+    const ruimte = Math.max(0, max - n);
+    const toon = g[k].slice(0, ruimte);
+    over += g[k].length - toon.length;
+    if (!toon.length) return;
+    html += `<div class="groep">${label} <b>${g[k].length}</b></div><ul>` + toon.map(taakRij).join('') + '</ul>';
+    n += toon.length;
+  });
+  if (!items.length) html = '<ul><li class="leeg">niets open 🎉</li></ul>';
+  else if (over > 0) html += `<ul><li class="leeg klik" onclick="openL2('acties')">… nog ${over} — alles ↗</li></ul>`;
+  return html;
+}
+function actiesRing(open, af){
+  const totaal = open + af, pct = totaal ? af / totaal : 0;
+  const omtrek = 2 * Math.PI * 25;
+  document.getElementById('ringVol').style.strokeDasharray = `${pct * omtrek} ${omtrek}`;
+  document.getElementById('ringGetal').textContent = af;
+  document.getElementById('ringTekst').innerHTML = `<b>${af} van ${totaal} afgerond</b><small>` +
+    (totaal === 0 ? 'niets te doen 🎉' : af === 0 ? 'nog niets afgevinkt deze week' : pct >= 1 ? 'alles af! 🎉'
+     : pct >= .5 ? 'goed bezig! 💪' : 'op weg') + '</small>';
+}
+function ico(titel, bron){
+  const t = (titel + ' ' + (bron || '')).toLowerCase();
+  const map = [[/jarig|verjaardag/, '🎂'], [/feest/, '🎈'], [/zwem/, '🏊'], [/hardlo|wandel|fiets/, '🏃'],
+    [/volleybal|spirit|training|wedstrijd|sport/, '🏐'], [/school|kijkavond|ouderavond|studiedag/, '🏫'],
+    [/tandarts|dokter|huisarts|ortho|fysio|dierenarts/, '🩺'], [/kapper/, '💇'], [/oppas/, '🧸'],
+    [/bezoek|visite|oma|opa|familie/, '👥'], [/opruim|schoonma|klus/, '🧹'], [/eten|diner|bbq|borrel|lunch/, '🍽️'],
+    [/vakantie|reis|weekend weg/, '✈️'], [/vergader|werk|overleg/, '💼'], [/muziek|les/, '🎵']];
+  for (const [re, e] of map) if (re.test(t)) return e;
+  return '•';
+}
+function aandachtKaart(s, i){
+  // regel-signaal als kaartje: kopje op bron, tekst, en één knop als er iets te doen valt
+  const kop = { acties: 'Acties', regelzaken: 'Regelzaak', verjaardagen: 'Verjaardag', onderwerpen: 'Onderwerp',
+                week: 'Agenda' }[s.l2] || 'Signaal';
+  const kl = s.ernst === 0 ? 'var(--rood)' : 'var(--amber)';
+  const open = s.l2 === 'week' ? "kiesTab('week')" : `openL2('${s.l2}')`;
+  let knop = '';
+  if (s.knop) knop = `<button class="aknop" onclick="event.stopPropagation();snelActie(${JSON.stringify(s.knop.tekst)},${JSON.stringify(s.knop.datum || '')},this)">＋ ${esc(s.knop.label)}</button>`;
+  else if (s.l2 === 'week') knop = `<button class="aknop" onclick="event.stopPropagation();kiesTab('week')">Agenda bekijken</button>`;
+  return `<div class="akaart" style="--kl:${kl}" onclick="${open}"><div class="akop">${kop}</div>` +
+    `<div class="atekst">${esc(s.tekst)}</div>${knop}</div>`;
+}
+function birdyKaart(tekst, tijd){
+  return `<div class="akaart" style="--kl:var(--amber)" onclick="openL2('aandacht')">` +
+    `<div class="akop"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"> Birdy${tijd ? `<small>${esc(tijd)}</small>` : ''}</div>` +
+    `<div class="atekst">${esc(tekst)}</div></div>`;
+}
+async function snelActie(tekst, datum, knop){
+  if (knop){ knop.disabled = true; knop.textContent = '… toevoegen'; }
+  try {
+    const r = await fetch('/api/add', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ lijst: 'acties', tekst, datum }) });
+    if (!r.ok) throw new Error();
+    toon(`⚡ “${tekst}” staat op de actielijst`); await ververs();
+  } catch(e){ toon('Toevoegen lukte even niet — probeer nog eens.'); if (knop){ knop.disabled = false; knop.textContent = 'Opnieuw'; } }
 }
 function afRij(x){
   return `<li class="afitem"><span>${esc(x.tekst)}</span>` +
@@ -1626,8 +1755,8 @@ function renderL2(){
       (b.items.length ? b.items.map(x => `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`).join('')
         : `<li class="leeg">${b.oud ? 'de vorige punten zijn ouder dan drie dagen' : 'nog niets'} — vraag Birdy hieronder om een verse blik, of wacht op de ochtendupdate van 07:15</li>`) + '</ul>';
     html += `<button class="blikknop" onclick="sluitL2(); stuur('Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties, onderwerpen en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.')">🐦 Vraag Birdy om een verse blik</button>`;
-    html += '<h4>Signalen uit agenda, acties en handboek</h4><ul>' +
-      ((a.signalen || []).length ? a.signalen.map(signaalRij).join('') : '<li class="leeg">niets dat aandacht vraagt 🙂</li>') + '</ul>';
+    html += '<h4>Signalen uit agenda, acties en handboek</h4>' +
+      ((a.signalen || []).length ? a.signalen.map(aandachtKaart).join('') : '<p class="leeg">niets dat aandacht vraagt 🙂</p>');
   } else if (L2open === 'boodschappen' || L2open === 'acties'){
     const items = filterItems(DATA[L2open] || [], x => x.tekst);
     html = filterChips() + '<ul>' +
@@ -1654,15 +1783,32 @@ function dagLabel(d){
   if (diff === 0) return 'Vandaag'; if (diff === 1) return 'Morgen';
   return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'short' });
 }
-function agendaHtml(items){
+function agendaHtml(items, max){
+  // tijdlijn: dag-kop met bolletje, per afspraak tijd + pil met icoontje; max regels zodat het past
   if (!items.length) return '<li class="leeg">niets gepland 🎉</li>';
+  max = max || 14;
   const groepen = {};
-  items.forEach(e => { const d = e.wanneer.slice(0,10); (groepen[d] = groepen[d]||[]).push(e); });
-  return Object.keys(groepen).sort().map(d =>
-    `<li class="dag">${dagLabel(d)}</li>` +
-    groepen[d].map(e => `<li><small>${e.wanneer.length>10 ? e.wanneer.slice(11) : 'hele dag'}</small><span>${esc(e.titel)}</span></li>`).join('')
-  ).join('');
+  items.forEach(e => { const d = e.start.slice(0,10); (groepen[d] = groepen[d]||[]).push(e); });
+  let html = '', n = 0, over = 0;
+  Object.keys(groepen).sort().forEach(d => {
+    if (n >= max){ over += groepen[d].length; return; }
+    const dt = new Date(d + 'T00:00');
+    const kort = dt.toLocaleDateString('nl-NL', { weekday:'short', day:'numeric', month:'short' });
+    const lbl = dagLabel(d);
+    html += `<li class="dag">${lbl.startsWith('Vandaag') || lbl.startsWith('Morgen') ? lbl : lbl.split(' ')[0].replace(/^./, c => c.toUpperCase())}<small>· ${kort}</small></li>`;
+    groepen[d].forEach(e => {
+      if (n >= max){ over++; return; }
+      const tijd = e.start.length > 10 ? e.start.slice(11,16) : '<span style="opacity:.7">dag</span>';
+      const k = kleurVoor(e.titel, e.bron);
+      html += `<li class="ev" onclick="detailVanVandaag(${e._i})"><small>${tijd}</small>` +
+        `<div class="evpil" style="border-left:2px solid ${k}"><em>${ico(e.titel, e.bron)}</em><span>${esc(e.titel)}</span></div></li>`;
+      n++;
+    });
+  });
+  if (over > 0) html += `<li class="leeg klik" onclick="kiesTab('week')">… nog ${over} deze week — weekoverzicht ↗</li>`;
+  return html;
 }
+function detailVanVandaag(i){ if (WEEK[i]) detailEv(i); }
 function dueBadge(d){
   if (!d) return '';
   const dt = new Date(d + 'T00:00'); const nu = new Date(); nu.setHours(0,0,0,0);
@@ -1919,21 +2065,24 @@ async function ververs(){
     document.getElementById('klok').textContent = d.nu;
     DATA = d;
     PERSONEN = d.personen || [];
-    document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
     if (WEEKOFFSET === 0){ WEEK = d.week || []; renderWeek(WEEK); }  // andere week: laten staan
-    // aandacht: eerst Birdy's punten (herkenbaar), dan de regel-signalen; samen max 5
+    // vandaag-agenda: tijdlijn uit dezelfde weekdata (indexen verwijzen naar WEEK voor de detailkaart)
+    const wk = (d.week || []).map((e, i) => Object.assign({}, e, { _i: i }));
+    const vandaagKey = isoDag(weekStart(0));
+    document.getElementById('agenda').innerHTML = agendaHtml(wk.filter(e => e.start.slice(0,10) >= vandaagKey));
+    // aandacht: Birdy's punten en regel-signalen als kaartjes; samen max 4 op het bord
     const a = d.aandacht || { birdy: { items: [] }, signalen: [] };
-    const birdyRows = ((a.birdy && a.birdy.items) || []).map(x =>
-      `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`);
+    const bItems = (a.birdy && a.birdy.items) || [];
+    const bTijd = a.birdy && a.birdy.tijd ? a.birdy.tijd.slice(-5) : '';
     const sig = a.signalen || [];
-    const sigRows = sig.slice(0, Math.max(2, 5 - birdyRows.length)).map(signaalRij);
-    const rows = birdyRows.concat(sigRows);
+    const bTonen = bItems.slice(0, 2), sTonen = sig.slice(0, Math.max(1, 4 - bTonen.length));
+    const kaarten = bTonen.map(x => birdyKaart(x, bTijd)).concat(sTonen.map(aandachtKaart));
     document.getElementById('aandacht').innerHTML =
-      rows.length ? rows.join('') : '<li class="leeg">niets dat aandacht vraagt 🙂</li>';
-    const restN = sig.length - sigRows.length;
-    document.getElementById('aandachtrest').innerHTML =
-      (a.birdy && a.birdy.tijd ? `<img src="/logo-bird.png" class="bird" onerror="this.remove()">Birdy · ${esc(a.birdy.tijd.slice(-5))}` : '') +
-      (restN > 0 ? `${a.birdy && a.birdy.tijd ? ' · ' : ''}nog ${restN} signa${restN > 1 ? 'len' : 'al'} ↗` : '');
+      kaarten.length ? kaarten.join('') : '<p class="leeg">niets dat aandacht vraagt 🙂</p>';
+    document.getElementById('aaCount').textContent = (bItems.length + sig.length) || '';
+    const restN = (bItems.length - bTonen.length) + (sig.length - sTonen.length);
+    document.getElementById('aandachtrest').innerHTML = restN > 0
+      ? `<span class="klik" onclick="openL2('aandacht')">nog ${restN} ${restN > 1 ? 'punten' : 'punt'} — alles ↗</span>` : '';
     // zijbalk: onderwerpen
     const mo = d.onderwerpen || [];
     document.getElementById('moCount').textContent = mo.length || '';
@@ -1943,7 +2092,8 @@ async function ververs(){
           `${o.dagen !== null ? dagenLabel(o.dagen) : esc(o.wanneer || '')}</small></li>`).join('') +
         (mo.length > 3 ? `<li class="meer">… nog ${mo.length - 3}</li>` : '')
       : '<li class="leeg">niets lopends 🎉</li>';
-    vulMeer('acties', d.acties || [], taakRij, 12, 'acties');
+    document.getElementById('acties').innerHTML = actiesGroepen(d.acties || [], 9);
+    actiesRing((d.acties || []).length, (d.acties_af || []).length);
     const afWrap = document.getElementById('actiesAfWrap');
     afWrap.style.display = (d.acties_af && d.acties_af.length) ? 'block' : 'none';
     document.getElementById('actiesAf').innerHTML = (d.acties_af || []).map(afRij).join('');
@@ -1955,6 +2105,8 @@ async function ververs(){
         (mb.length > 3 ? `<li class="meer">… nog ${mb.length - 3}</li>` : '')
       : '<li class="leeg">lijst is leeg 🎉</li>';
     const mv = d.verjaardagen || [];
+    document.getElementById('mvCount').textContent = mv.length || '';
+    document.getElementById('mrCount').textContent = (d.regelzaken || []).length || '';
     document.getElementById('mvList').innerHTML = mv.length
       ? mv.slice(0, 2).map(j => `<li><span>${esc(j.naam)}</span>` +
           `<small class="${j.dagen === 0 ? 'nu' : ''}">${dagenLabel(j.dagen)}</small></li>`).join('')
