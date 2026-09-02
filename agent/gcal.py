@@ -19,6 +19,33 @@ from datetime import datetime, timedelta
 TZ = "Europe/Amsterdam"
 
 
+def _lokaal(dt: datetime) -> datetime:
+    """Elke tijd naar Nederlandse wandkloktijd. Tijdzone-bewuste tijden (UTC uit een API,
+    Europe/Paris uit een iCal) worden omgerekend; naïeve tijden zijn al lokaal."""
+    if dt.tzinfo is None:
+        return dt
+    from zoneinfo import ZoneInfo
+
+    return dt.astimezone(ZoneInfo(TZ)).replace(tzinfo=None)
+
+
+def _tijdvak(start: str | datetime, eind: str | datetime | None) -> str:
+    """'2026-09-06 13:00–16:00' (met tijd) of '2026-09-06' (hele dag), altijd lokaal."""
+    def parse(v):
+        if isinstance(v, datetime):
+            return _lokaal(v)
+        if isinstance(v, str) and "T" in v:
+            return _lokaal(datetime.fromisoformat(v))
+        return v  # date of 'YYYY-MM-DD'
+    s, e = parse(start), parse(eind) if eind else None
+    if isinstance(s, datetime):
+        tekst = s.strftime("%Y-%m-%d %H:%M")
+        if isinstance(e, datetime) and e > s:
+            tekst += "–" + (e.strftime("%H:%M") if e.date() == s.date() else e.strftime("%d-%m %H:%M"))
+        return tekst
+    return str(s)[:10]
+
+
 try:
     from agent.google_auth import CALENDAR_SCOPE, configured, google_credentials
 except ImportError:  # aangeroepen als los script: python /app/agent/gcal.py
@@ -59,8 +86,9 @@ def _google_events(days: int) -> list[tuple[str, str]]:
     out = []
     for ev in result.get("items", []):
         start = ev["start"].get("dateTime", ev["start"].get("date", ""))
-        when = start.replace("T", " ")[:16]
-        out.append((when, f"{when} | {ev.get('summary', '(zonder titel)')}"))
+        eind = ev.get("end", {}).get("dateTime")
+        when = _tijdvak(start, eind)
+        out.append((when[:16], f"{when} | {ev.get('summary', '(zonder titel)')}"))
     return out
 
 
@@ -81,12 +109,10 @@ def _familywall_events(days: int) -> list[tuple[str, str]]:
     out = []
     for ev in events:
         start = ev.get("DTSTART").dt
-        if isinstance(start, datetime):
-            when = start.strftime("%Y-%m-%d %H:%M")
-        else:  # hele dag
-            when = start.strftime("%Y-%m-%d")
+        eind = ev.get("DTEND")
+        when = _tijdvak(start, eind.dt if eind and isinstance(start, datetime) else None)
         title = str(ev.get("SUMMARY", "(zonder titel)"))
-        out.append((when, f"{when} | {title} (FamilyWall)"))
+        out.append((when[:16], f"{when} | {title} (FamilyWall)"))
     return out
 
 
@@ -101,6 +127,8 @@ def cmd_list(days: int) -> None:
         except Exception as e:
             errors.append(f"{source}: {type(e).__name__}: {e}")
     seen = set()
+    if rows:
+        print(f"Tijden zijn Nederlandse tijd ({TZ}), begin–eind. Dit is de enige betrouwbare bron voor tijden.")
     for _, line in sorted(rows):
         # zelfde moment + titel uit beide bronnen → één keer tonen
         norm = line.replace(" (FamilyWall)", "")

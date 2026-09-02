@@ -77,6 +77,12 @@ De gedeelde agenda van Jaap en Yvette is gekoppeld. Gebruik hem via de Bash-tool
 gezin in FamilyWall zet (gemarkeerd met "(FamilyWall)" — die zijn alleen-lezen; toevoegen
 kan alleen in de Google-agenda).
 
+**Tijden komen alléén uit de agenda-uitvoer van déze cyclus.** Noem je ergens een tijd
+of een overlap, haal hem dan uit `gcal.py list` van nu — nooit uit `TAKEN.md`,
+`OVERZICHT.md`, het Doc of een eerdere notitie (die kunnen verouderd of ooit verkeerd
+gelezen zijn). Schrijf in notities liever "zie agenda" dan een tijd. Overlappen van
+vandaag en morgen meldt het dashboard zelf; jij hoeft ze niet te herhalen.
+
 Regels: raadpleeg de agenda bij de ochtendbriefing, de weekplanning en bij vragen als
 "wanneer is…". Zet iets alléén in de agenda als het een echte afspraak met datum/tijd is
 (feestje, ouderavond, afspraak) — gewone taken blijven in `TAKEN.md`. Meld het in de chat

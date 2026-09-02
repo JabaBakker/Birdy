@@ -271,6 +271,19 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(t.startswith("⚠️ Overlap vandaag 11:00") for t in teksten))
         self.assertFalse(any("Oma" in t for t in teksten))
 
+    def test_tijden_lokaal(self):
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        from agent.gcal import _lokaal, _tijdvak
+        # UTC uit een API → NL-zomertijd (+2)
+        self.assertEqual(_lokaal(datetime(2026, 9, 6, 11, 0, tzinfo=timezone.utc)).hour, 13)
+        # Europe/Paris uit een iCal → zelfde wandklok als Amsterdam
+        self.assertEqual(_lokaal(datetime(2026, 9, 6, 13, 0, tzinfo=ZoneInfo("Europe/Paris"))).hour, 13)
+        self.assertEqual(_tijdvak("2026-09-06T13:00:00+02:00", "2026-09-06T16:00:00+02:00"),
+                         "2026-09-06 13:00–16:00")
+        self.assertEqual(_tijdvak("2026-09-06T11:00:00Z", "2026-09-06T14:00:00Z"), "2026-09-06 13:00–16:00")
+        self.assertEqual(_tijdvak("2026-09-07", None), "2026-09-07")
+
     def test_dubbelingen(self):
         from agent.dashboard import _dubbelingen
         acties = [{"tekst": "Cadeau kopen voor Evi's verjaardag"},

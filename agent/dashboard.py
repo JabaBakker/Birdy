@@ -56,10 +56,14 @@ def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
                 org = ev.get("organizer", {}) or {}
                 naam = (org.get("displayName") or wie.get("displayName")
                         or wie.get("email") or org.get("email") or "")
+                def lokaal(v: str) -> str:  # dateTime met offset → NL-wandkloktijd
+                    if "T" in v:
+                        return gcal._lokaal(datetime.fromisoformat(v)).strftime("%Y-%m-%dT%H:%M")
+                    return v[:10]
                 events.append({
                     "id": ev.get("id", ""),
-                    "start": (s.get("dateTime") or s.get("date", ""))[:16],
-                    "eind": (e.get("dateTime") or e.get("date", ""))[:16],
+                    "start": lokaal(s.get("dateTime") or s.get("date", "")),
+                    "eind": lokaal(e.get("dateTime") or e.get("date", "")),
                     "titel": ev.get("summary", "(zonder titel)"),
                     "omschrijving": (ev.get("description") or "")[:600],
                     "locatie": ev.get("location", ""),
@@ -81,9 +85,11 @@ def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
             cal = icalendar.Calendar.from_ical(resp.content)
             now = datetime.now()
 
+            from . import gcal
+
             def iso(v) -> str:
                 if isinstance(v, datetime):
-                    return v.strftime("%Y-%m-%dT%H:%M")
+                    return gcal._lokaal(v).strftime("%Y-%m-%dT%H:%M")
                 return v.strftime("%Y-%m-%d") if v else ""
 
             for ev in recurring_ical_events.of(cal).between(now, now + timedelta(days=days)):
