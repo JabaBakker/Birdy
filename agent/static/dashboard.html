@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="nl"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/logo-bird.png">
+<title>Birdy</title>
+<link rel="stylesheet" href="/dashboard.css?v={versie}">
+</head><body>
+<div id="sleutel">
+  <img src="/logo.png" alt="Birdy" style="max-height:200px" onerror="this.style.display='none'"><br><br>
+  <p>Vul de dashboard-sleutel in (staat in de .env op de server):</p><br>
+  <input id="sleutelveld" placeholder="sleutel"> <button onclick="zetSleutel()">Opslaan</button></div>
+<div id="app" style="display:none">
+  <header>
+    <h1><img src="/logo-bird.png" alt="" onerror="this.replaceWith('🐦')"><span>Birdy</span></h1>
+    <div id="tabs">
+      <button id="tabVandaag" class="actief" onclick="kiesTab('vandaag')">Vandaag</button>
+      <button id="tabWeek" onclick="kiesTab('week')">Week</button>
+      <button id="tabPlan" onclick="kiesTab('plan')">Planning</button>
+    </div>
+    <div id="tekstinvoer">
+      <input id="invoer" placeholder="Zeg of typ iets tegen Birdy — “voeg kwark toe aan de boodschappen”">
+      <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
+      <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
+    </div>
+    <div id="klok"></div>
+  </header>
+  <div class="lay" id="paneelVandaag">
+    <aside class="zijbalk">
+      <div class="mini" onclick="openL2('onderwerpen')">
+        <div class="kaartkop"><span class="ico">📂</span><h3>Onderwerpen</h3><b id="moCount"></b><i>›</i></div><ul id="moList"></ul></div>
+      <div class="mini" onclick="openL2('boodschappen')">
+        <div class="kaartkop"><span class="ico">🛒</span><h3>Boodschappen</h3><b id="mbCount"></b><i>›</i></div><ul id="mbList"></ul></div>
+      <div class="mini" onclick="openL2('verjaardagen')">
+        <div class="kaartkop"><span class="ico">🎂</span><h3>Verjaardagen</h3><b id="mvCount"></b><i>›</i></div><ul id="mvList"></ul></div>
+      <div class="mini" onclick="openL2('regelzaken')">
+        <div class="kaartkop"><span class="ico">🔁</span><h3>Regelzaken</h3><b id="mrCount"></b><i>›</i></div><ul id="mrList"></ul></div>
+      <div class="mini" id="miniThuis" style="display:none" onclick="openL2('thuis')">
+        <div class="kaartkop"><span class="ico">🏠</span><h3>Thuis</h3><i>›</i></div><ul id="mtList"></ul></div>
+    </aside>
+    <div class="hoofd">
+      <div class="panel"><div class="kaartkop" onclick="kiesTab('week')" title="Naar weekoverzicht"><span class="ico">📅</span><h2>Agenda</h2><button class="kopknop" title="afspraak toevoegen" onclick="event.stopPropagation();nieuwEv()">＋</button><i>⤢</i></div><ul id="agenda" class="tl scroll"></ul></div>
+      <div class="panel aandacht"><div class="kaartkop" onclick="openL2('aandacht')"><span class="ico">💡</span><h2>Aandacht</h2><b id="aaCount"></b><i>⤢</i></div><div id="aandacht" class="scroll"></div><div class="rest" id="aandachtrest"></div></div>
+      <div class="panel"><div class="kaartkop" onclick="openL2('acties')"><span class="ico">⚡</span><h2>Acties</h2><i>⤢</i></div>
+        <div class="ringwrap"><svg class="ring" viewBox="0 0 60 60"><circle class="spoor" cx="30" cy="30" r="25"/><circle class="vol" id="ringVol" cx="30" cy="30" r="25"/><text x="30" y="35" id="ringGetal">0</text></svg><div class="ringtekst" id="ringTekst"></div></div>
+        <div id="acties" class="scroll"></div>
+        <div class="toevoeg"><input placeholder="+ nieuwe actie…" enterkeyhint="done"
+          onkeydown="voegToe(event,'acties',this)"></div>
+        <details class="af" id="actiesAfWrap"><summary>onlangs afgevinkt</summary>
+          <ul id="actiesAf"></ul></details></div>
+    </div>
+  </div>
+  <div id="paneelWeek">
+    <div class="wknav">
+      <button onclick="weekStap(-1)" title="vorige week">‹</button>
+      <button class="nu" onclick="weekStap(0)">Vandaag</button>
+      <button onclick="weekStap(1)" title="volgende week">›</button>
+      <span id="wkLabel"></span>
+      <input id="wkZoek" placeholder="🔍 zoek in de agenda… (bijv. tandarts)" enterkeyhint="search"
+        onkeydown="if(event.key==='Enter'){zoekAgenda(this.value);this.blur();}">
+    </div>
+    <div class="wkwrap"><div class="wk" id="wkgrid"></div></div>
+    <div class="legenda" id="legenda"></div>
+  </div>
+  <div id="paneelPlan"></div>
+</div>
+<div id="melding"></div>
+<canvas id="plCanvas"></canvas>
+<div id="plKlaar" onclick="this.style.display='none'">
+  <h1>🎉 Goed gedaan! 🎉</h1><p>Alles is af — wat ging dat snel!</p></div>
+<div id="plNieuw" onclick="this.style.display='none'">
+  <div id="pnKaart" onclick="event.stopPropagation()">
+    <h3>➕ Nieuw taakje</h3>
+    <div id="pnEmojis"></div>
+    <input id="pnNaam" placeholder="Hoe heet het taakje?" maxlength="30">
+    <div class="pn-rij"><span>Duur:</span>
+      <button class="stap" onclick="plNieuwMinStap(-1)">−</button>
+      <b id="pnMin"></b>
+      <button class="stap" onclick="plNieuwMinStap(1)">+</button>
+      <button class="groot" onclick="plNieuwToevoegen()">Toevoegen</button></div>
+  </div>
+</div>
+<div id="l2" onclick="sluitL2()">
+  <div id="l2kaart" onclick="event.stopPropagation()">
+    <div id="l2kop"><h3 id="l2Titel"></h3><button onclick="sluitL2()" title="Sluiten">✕</button></div>
+    <div id="l2Inhoud"></div>
+  </div>
+</div>
+<div id="taakvraag" onclick="sluitTaakVraag()">
+  <div id="tvKaart" onclick="event.stopPropagation()">
+    <h3 id="tvTitel"></h3>
+    <div id="tvNotitie" class="notitie"></div>
+    <div id="tvAntwoord"></div>
+    <div id="tvInvoer">
+      <input id="tvVeld" placeholder="Vraag Birdy iets over deze taak…" enterkeyhint="send">
+      <button class="micknop" onclick="spraak(this, tvStuur)" title="Spreek je vraag in">🎤</button>
+      <button onclick="tvStuur(document.getElementById('tvVeld').value)">→</button>
+    </div>
+  </div>
+</div>
+<div id="detail" onclick="this.style.display='none'">
+  <div id="detailkaart" onclick="event.stopPropagation()">
+    <h3 id="dTitel"></h3>
+    <div id="dRegels"></div>
+    <div id="dKnoppen"><button onclick="document.getElementById('detail').style.display='none'">Sluiten</button></div>
+  </div>
+</div>
+<button id="chatfab" title="Chat met Birdy" onclick="chatOpen(true)">
+  <img src="/logo-bird.png" alt="" onerror="this.replaceWith('💬')"></button>
+<div id="chat">
+  <div id="chatkop"><img src="/logo-bird.png" alt="" onerror="this.replaceWith('🐦')">Birdy
+    <button onclick="chatOpen(false)" title="Sluiten">✕</button></div>
+  <div id="chatlog"></div>
+  <div id="chatinvoer">
+    <input id="chatveld" placeholder="Typ je bericht…" enterkeyhint="send">
+    <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
+    <button onclick="stuur(document.getElementById('chatveld').value)">→</button>
+  </div>
+</div>
+<script src="/dashboard.js?v={versie}"></script>
+</body></html>
