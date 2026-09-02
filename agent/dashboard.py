@@ -1113,13 +1113,13 @@ PAGE = """<!doctype html>
   @media (min-width:761px){
     #paneelVandaag.lay { height:calc(100dvh - var(--kop, 6.5rem)); grid-template-rows:minmax(0, 1fr);
                          align-items:stretch; }
-    .zijbalk { min-height:0; overflow-y:auto; overscroll-behavior:contain; padding-right:.15rem; }
+    .zijbalk { min-height:0; overflow-y:auto; overscroll-behavior:contain; }
     .hoofd { min-height:0; grid-template-rows:minmax(0, 1fr); align-items:stretch; }
     .hoofd .panel { display:flex; flex-direction:column; min-height:0; max-height:100%; }
-    .hoofd .panel .scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
-                            padding-right:.15rem; }
-    .scroll::-webkit-scrollbar, .zijbalk::-webkit-scrollbar { width:5px; }
-    .scroll::-webkit-scrollbar-thumb, .zijbalk::-webkit-scrollbar-thumb { background:rgba(255,255,255,.12); border-radius:99px; }
+    .hoofd .panel .scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+    /* scrollbalken verborgen: touchscreen of muiswiel scrolt gewoon, zonder ruimte te kosten */
+    .scroll, .zijbalk { scrollbar-width:none; -ms-overflow-style:none; }
+    .scroll::-webkit-scrollbar, .zijbalk::-webkit-scrollbar { display:none; width:0; height:0; }
   }
   /* ── planning (kinderroutine) ── */
   #paneelPlan { display:none; max-width:600px; margin:0 auto; }
