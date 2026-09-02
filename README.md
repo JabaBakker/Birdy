@@ -95,6 +95,11 @@ Werkt zoals voorheen: bot via @BotFather (`/setprivacy` → Disable), token in
   Birdy op verzoek ("zoek eens uit …"); het dagelijkse eigen-initiatief-moment staat uit
   (AGENT_PROACTIVE_TIME leeg; vul een tijd in om het aan te zetten).
 - "die is klaar" / "verzet dat naar vrijdag" — gewoon zeggen, Birdy werkt het bij.
+- Uitrollen gaat via GitHub: een push naar `main` draait de tests (GitHub Actions) en
+  start daarna `scripts/deploy.sh` op de VPS (git pull + `docker compose up --build`).
+  Nodig: deploy-sleutel van de VPS als *Deploy key* op de repo, en de Actions-sleutel als
+  secret `VPS_SSH_KEY` (die mag op de VPS alleen het deploy-script starten).
+  Handmatig kan ook: `bash /root/family-agent/scripts/deploy.sh` op de server.
 - Sportprogramma's (iCal-link van Nevobo, KNVB, …) in `AGENDA_SYNC_ICS` zet Birdy elke
   paar uur ín de Google-gezinsagenda en houdt ze actueel (verschoven of afgelast = mee).
   `AGENDA_ICS_FEEDS` toont een feed alleen-lezen náást de agenda (zoals FamilyWall).
