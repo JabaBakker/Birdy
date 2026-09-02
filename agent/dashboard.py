@@ -260,6 +260,49 @@ def _agenda_verzet(event_id: str, start: str, eind: str) -> bool:
         return False
 
 
+def _regelzaken() -> list[dict]:
+    """Terugkerende regelzaken uit het huishoudhandboek (Google Doc), gesorteerd op
+    'volgende'-datum. Regelformat: • Kapper Evi — wie: Yvette · elke: ~8 weken ·
+    laatst: 15-07-2026 · volgende: ±09-09-2026"""
+    import re
+
+    from . import gdrive
+
+    try:
+        svc = gdrive._service()
+        node = gdrive._resolve(svc, "20 Huishouden/Huishoudhandboek", must_exist=False)
+        if not node:
+            return []
+        text = svc.files().export(fileId=node["id"], mimeType="text/plain").execute()
+        text = text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
+    except BaseException:
+        return []
+
+    def veld(s: str, naam: str) -> str:
+        m = re.search(naam + r"\s*:\s*±?\s*([^·]+)", s, re.I)
+        return m.group(1).strip() if m else ""
+
+    vandaag = date.today()
+    out = []
+    for line in text.splitlines():
+        s = line.strip().lstrip("•-* ").strip()
+        if not s or not re.search(r"\b(volgende|elke)\b", s, re.I):
+            continue
+        naam = re.split(r"\s+[—–-]\s+|\s+·\s+", s)[0].strip()
+        volgende = veld(s, "volgende")
+        dagen = None
+        m = re.search(r"(\d{1,2})-(\d{1,2})-(\d{4})", volgende)
+        if m:
+            try:
+                dagen = (date(int(m.group(3)), int(m.group(2)), int(m.group(1))) - vandaag).days
+            except ValueError:
+                pass
+        out.append({"naam": naam[:60], "wie": veld(s, "wie"), "elke": veld(s, "elke"),
+                    "laatst": veld(s, "laatst"), "volgende": volgende, "dagen": dagen})
+    out.sort(key=lambda z: (z["dagen"] is None, z["dagen"] if z["dagen"] is not None else 0))
+    return out[:30]
+
+
 def _verjaardagen() -> list[dict]:
     from . import gdrive
 
@@ -375,17 +418,19 @@ class Dashboard:
     async def _bouw(self) -> dict:
         gen = self._gen
         if not self._traag or time.time() - self._traag_ts > CACHE_TTL:
-            (week, compleet), jarigen = await asyncio.gather(
+            (week, compleet), jarigen, regelzaken = await asyncio.gather(
                 asyncio.to_thread(_agenda_rijk),
                 asyncio.to_thread(_verjaardagen),
+                asyncio.to_thread(_regelzaken),
             )
             if compleet or not self._traag:
-                self._traag = {"week": week, "verjaardagen": jarigen}
+                self._traag = {"week": week, "verjaardagen": jarigen, "regelzaken": regelzaken}
                 self._traag_ts = time.time()
             else:
                 # een bron faalde: houd de vorige complete week vast en probeer bij de
                 # volgende aanvraag meteen opnieuw (ts bewust niet bijgewerkt)
                 self._traag["verjaardagen"] = jarigen
+                self._traag["regelzaken"] = regelzaken
         boodschappen, acties, boodschappen_af, acties_af = await asyncio.gather(
             asyncio.to_thread(_todoist_lijst, "boodschappen"),
             asyncio.to_thread(_todoist_lijst, "acties"),
@@ -405,6 +450,7 @@ class Dashboard:
             "boodschappen_af": boodschappen_af,
             "acties_af": acties_af,
             "verjaardagen": self._traag["verjaardagen"],
+            "regelzaken": self._traag.get("regelzaken", []),
         }
         if gen == self._gen:  # geen mutatie tijdens het bouwen → cachen mag
             self._cache = vers
@@ -692,6 +738,32 @@ PAGE = """<!doctype html>
   #chatinvoer button { border:none; border-radius:10px; padding:0 .85rem; font-size:1.1rem;
                        cursor:pointer; background:var(--accent); color:#14171a; }
   li.klik { cursor:pointer; }
+  /* ── vandaag: compacte zijbalk + hoofdvlak ── */
+  #paneelVandaag.lay { display:grid; grid-template-columns:238px 1fr; gap:.9rem;
+                       align-items:start; }
+  .zijbalk { display:flex; flex-direction:column; gap:.65rem; }
+  .mini { background:var(--panel); border-radius:12px; padding:.7rem .85rem; cursor:pointer;
+          border:1px solid transparent; }
+  .mini:hover, .mini:active { border-color:var(--accent); }
+  .mini h3 { font-size:.72rem; letter-spacing:.09em; text-transform:uppercase;
+             color:var(--accent); display:flex; align-items:center; gap:.4rem;
+             margin-bottom:.35rem; }
+  .mini h3 b { margin-left:auto; background:rgba(127,191,166,.18); color:var(--accent);
+               border-radius:99px; padding:0 .5rem; font-size:.7rem; }
+  .mini ul { list-style:none; padding:0; }
+  .mini li { font-size:.86rem; padding:.13rem 0; display:flex; gap:.4rem; align-items:baseline; }
+  .mini li span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mini li small { color:var(--dim); flex:0 0 auto; font-size:.74rem; }
+  .mini li small.laat { color:var(--rood); font-weight:700; }
+  .mini li small.nu { color:var(--amber); font-weight:700; }
+  .mini li.meer { color:var(--dim); font-size:.78rem; }
+  .hoofd { display:grid; gap:.9rem; grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+           align-items:start; }
+  @media (max-width:760px){
+    #paneelVandaag.lay { grid-template-columns:1fr; }
+    .zijbalk { flex-direction:row; overflow-x:auto; }
+    .mini { min-width:190px; flex:0 0 auto; }
+  }
   /* ── planning (kinderroutine) ── */
   #paneelPlan { display:none; max-width:600px; margin:0 auto; }
   .pl-kop { display:flex; align-items:center; gap:.7rem; margin-bottom:1rem; }
@@ -907,22 +979,24 @@ PAGE = """<!doctype html>
     <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
     <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
   </div>
-  <div class="grid" id="paneelVandaag">
-    <div class="panel"><h2 class="klik" onclick="kiesTab('week')" title="Naar weekoverzicht">📅 Agenda ↗</h2><ul id="agenda"></ul></div>
-    <div class="kolom">
+  <div class="lay" id="paneelVandaag">
+    <aside class="zijbalk">
+      <div class="mini" onclick="openL2('boodschappen')">
+        <h3>🛒 Boodschappen <b id="mbCount"></b></h3><ul id="mbList"></ul></div>
+      <div class="mini" onclick="openL2('verjaardagen')">
+        <h3>🎂 Verjaardagen</h3><ul id="mvList"></ul></div>
+      <div class="mini" onclick="openL2('regelzaken')">
+        <h3>🔁 Regelzaken</h3><ul id="mrList"></ul></div>
+    </aside>
+    <div class="hoofd">
+      <div class="panel"><h2 class="klik" onclick="kiesTab('week')" title="Naar weekoverzicht">📅 Agenda ↗</h2><ul id="agenda"></ul></div>
       <div class="panel"><h2 class="klik" onclick="openL2('taken')">📋 Wat loopt er ↗</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
-      <div class="panel" id="jarig"><h2 class="klik" onclick="openL2('verjaardagen')">🎂 Verjaardagen ↗</h2><ul id="verjaardagen"></ul></div>
+      <div class="panel"><h2 class="klik" onclick="openL2('acties')">⚡ Acties ↗</h2><ul id="acties"></ul>
+        <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
+          onkeydown="voegToe(event,'acties',this)"></div>
+        <details class="af" id="actiesAfWrap"><summary>onlangs afgevinkt</summary>
+          <ul id="actiesAf"></ul></details></div>
     </div>
-    <div class="panel"><h2 class="klik" onclick="openL2('boodschappen')">🛒 Boodschappen ↗</h2><ul id="boodschappen"></ul>
-      <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
-        onkeydown="voegToe(event,'boodschappen',this)"></div>
-      <details class="af" id="boodschappenAfWrap"><summary>onlangs afgevinkt</summary>
-        <ul id="boodschappenAf"></ul></details></div>
-    <div class="panel"><h2 class="klik" onclick="openL2('acties')">⚡ Acties ↗</h2><ul id="acties"></ul>
-      <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
-        onkeydown="voegToe(event,'acties',this)"></div>
-      <details class="af" id="actiesAfWrap"><summary>onlangs afgevinkt</summary>
-        <ul id="actiesAf"></ul></details></div>
   </div>
   <div id="paneelWeek">
     <div class="wkwrap"><div class="wk" id="wkgrid"></div></div>
@@ -1048,6 +1122,29 @@ function filterItems(items, tekstVan){
     return L2filter === 'overig' ? !p : (p && p.naam === L2filter);
   });
 }
+function dagenLabel(d){
+  if (d === null || d === undefined) return '';
+  if (d < 0) return 'te laat';
+  if (d === 0) return 'vandaag';
+  if (d === 1) return 'morgen';
+  return 'over ' + d + ' d';
+}
+async function regelzaakGedaan(i){
+  const z = (DATA.regelzaken || [])[i]; if (!z) return;
+  const tekst = `We hebben net "${z.naam}" gedaan. Werk het huishoudhandboek bij: laatst = vandaag,` +
+    ` volgende = vandaag + het interval. Bevestig kort.`;
+  chatVoeg('ik', `✓ ${z.naam} gedaan`);
+  toon(`✓ Doorgegeven aan Birdy: "${z.naam}" is gedaan — handboek wordt bijgewerkt…`);
+  try {
+    const r = await fetch('/api/message', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ text: tekst }) });
+    const d = await r.json();
+    chatVoeg('birdy', d.reply || d.error || 'er ging iets mis');
+    toon('🐦 ' + (d.reply || d.error || 'er ging iets mis'));
+    ververs();
+  } catch(e){ toon('Doorgeven lukte even niet — probeer nog eens.'); }
+}
 function taakRijL2(x){
   const p = persoonMatch(x.tekst);
   return `<li class="vink"${p ? ` style="--pc:${p.kleur}"` : ''} onclick="vink(this,'${x.id}')">` +
@@ -1096,10 +1193,24 @@ async function tvStuur(vraag){
 function renderL2(){
   if (!L2open || !DATA) return;
   document.getElementById('l2Titel').textContent = {
-    taken: '📋 Alles wat loopt', boodschappen: '🛒 Boodschappen — alles',
+    taken: '📋 Alles wat loopt', boodschappen: '🛒 Boodschappen',
     acties: '⚡ Acties — alles', verjaardagen: '🎂 Verjaardagen & cadeau-ideeën',
+    regelzaken: '🔁 Regelzaken — huishoudhandboek',
   }[L2open];
   let html = '';
+  if (L2open === 'regelzaken'){
+    const items = DATA.regelzaken || [];
+    html = '<ul>' + (items.length ? items.map((z, i) =>
+      `<li><span>${esc(z.naam)}${z.wie ? persChip(z.wie) : ''}` +
+      `<span class="due ${z.dagen !== null && z.dagen < 0 ? 'laat' : z.dagen === 0 ? 'nu' : 'straks'}">` +
+      `${dagenLabel(z.dagen) || 'geen datum'}</span><br>` +
+      `<span class="notitie">${esc([z.elke ? 'elke ' + z.elke : '', z.laatst ? 'laatst ' + z.laatst : '',
+        z.volgende ? 'volgende ' + z.volgende : ''].filter(Boolean).join(' · '))}</span></span>` +
+      `<button class="herstelknop" title="net gedaan — Birdy werkt het handboek bij"` +
+      ` onclick="regelzaakGedaan(${i})">✓ gedaan</button></li>`).join('')
+      : '<li class="leeg">Nog geen regelzaken — zeg tegen Birdy: "de grijze bak gaat elke 2 weken aan straat".</li>') + '</ul>';
+    document.getElementById('l2Inhoud').innerHTML = html; return;
+  }
   if (L2open === 'taken'){
     const secties = DATA.overzicht_vol || [];
     const zicht = secties.map(s => ({ kop: s.kop, items: filterItems(s.items, x => x) }))
@@ -1115,6 +1226,8 @@ function renderL2(){
     html = filterChips() + '<ul>' +
       (items.length ? items.map(taakRijL2).join('') : '<li class="leeg">niets voor dit filter</li>') +
       '</ul>';
+    html += `<div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
+      onkeydown="voegToe(event,'${L2open}',this)"></div>`;
     const af = filterItems(DATA[L2open + '_af'] || [], x => x.tekst);
     if (af.length) html += '<h4>↩ Onlangs afgevinkt</h4><ul>' + af.map(afRij).join('') + '</ul>';
   } else if (L2open === 'verjaardagen'){
@@ -1356,14 +1469,29 @@ async function ververs(){
     document.getElementById('taken').innerHTML =
       rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
     document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
-    vulMeer('boodschappen', d.boodschappen || [], taakRij, 12, 'boodschappen');
     vulMeer('acties', d.acties || [], taakRij, 12, 'acties');
-    [['boodschappen', d.boodschappen_af], ['acties', d.acties_af]].forEach(([naam, items]) => {
-      const wrap = document.getElementById(naam + 'AfWrap');
-      wrap.style.display = (items && items.length) ? 'block' : 'none';
-      document.getElementById(naam + 'Af').innerHTML = (items || []).map(afRij).join('');
-    });
-    vulMeer('verjaardagen', d.verjaardagen || [], jarigRij, 5, 'verjaardagen');
+    const afWrap = document.getElementById('actiesAfWrap');
+    afWrap.style.display = (d.acties_af && d.acties_af.length) ? 'block' : 'none';
+    document.getElementById('actiesAf').innerHTML = (d.acties_af || []).map(afRij).join('');
+    // zijbalk: compacte mini-kaarten
+    const mb = d.boodschappen || [];
+    document.getElementById('mbCount').textContent = mb.length || '';
+    document.getElementById('mbList').innerHTML = mb.length
+      ? mb.slice(0, 3).map(x => `<li><span>${esc(x.tekst)}</span></li>`).join('') +
+        (mb.length > 3 ? `<li class="meer">… nog ${mb.length - 3}</li>` : '')
+      : '<li class="leeg">lijst is leeg 🎉</li>';
+    const mv = d.verjaardagen || [];
+    document.getElementById('mvList').innerHTML = mv.length
+      ? mv.slice(0, 2).map(j => `<li><span>${esc(j.naam)}</span>` +
+          `<small class="${j.dagen === 0 ? 'nu' : ''}">${dagenLabel(j.dagen)}</small></li>`).join('')
+      : '<li class="leeg">geen bekend</li>';
+    const mr = d.regelzaken || [];
+    document.getElementById('mrList').innerHTML = mr.length
+      ? mr.slice(0, 3).map(z => `<li><span>${esc(z.naam)}</span>` +
+          `<small class="${z.dagen !== null && z.dagen < 0 ? 'laat' : z.dagen === 0 ? 'nu' : ''}">` +
+          `${dagenLabel(z.dagen)}</small></li>`).join('') +
+        (mr.length > 3 ? `<li class="meer">… nog ${mr.length - 3}</li>` : '')
+      : '<li class="leeg">handboek nog leeg</li>';
     renderL2();
   } catch (e) { /* volgende poging over 60s */ }
 }
