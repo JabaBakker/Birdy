@@ -5,6 +5,9 @@
 # .env en workspace/ staan niet in git en blijven onaangeraakt.
 set -euo pipefail
 cd /root/family-agent
+# nooit twee uitrollen tegelijk (bijv. Actions + handmatig): wachten op de vorige
+exec 9>/tmp/birdy-deploy.lock
+flock 9
 
 voor=$(git rev-parse --short HEAD 2>/dev/null || echo "-")
 git fetch --quiet origin main
