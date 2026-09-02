@@ -1150,6 +1150,10 @@ PAGE = """<!doctype html>
                border-radius:8px; padding:.15rem .5rem; cursor:pointer; font-size:.85rem;
                opacity:.75; }
   .vraagknop:hover, .vraagknop:active { border-color:var(--accent); opacity:1; }
+  .blikknop { display:inline-block; margin:.3rem 0 1rem; background:var(--accent); color:#14171a;
+              border:none; border-radius:10px; padding:.55rem 1rem; font-size:1rem; font-weight:700;
+              cursor:pointer; }
+  .blikknop:active { filter:brightness(.9); }
   #l2kop { display:flex; align-items:baseline; }
   #l2kop h3 { font-size:1.1rem; }
   #l2kop button { margin-left:auto; background:none; border:none; color:var(--dim);
@@ -1529,8 +1533,8 @@ function renderL2(){
     html = `<h4><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"> Wat Birdy opviel` +
       (b.tijd && b.items.length ? ` <span class="notitie">· ${esc(b.tijd)}</span>` : '') + '</h4><ul>' +
       (b.items.length ? b.items.map(x => `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`).join('')
-        : `<li class="leeg">${b.oud ? 'de vorige punten zijn ouder dan drie dagen' : 'nog niets'} — vraag Birdy hieronder om een verse blik, of wacht op de weekplanning van zondag</li>`) + '</ul>';
-    html += `<button class="vraagknop" style="margin:.2rem 0 .9rem" onclick="sluitL2(); stuur('Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties, onderwerpen en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.')">🐦 Vraag Birdy om een verse blik</button>`;
+        : `<li class="leeg">${b.oud ? 'de vorige punten zijn ouder dan drie dagen' : 'nog niets'} — vraag Birdy hieronder om een verse blik, of wacht op de ochtendupdate van 07:15</li>`) + '</ul>';
+    html += `<button class="blikknop" onclick="sluitL2(); stuur('Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties, onderwerpen en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.')">🐦 Vraag Birdy om een verse blik</button>`;
     html += '<h4>Signalen uit agenda, acties en handboek</h4><ul>' +
       ((a.signalen || []).length ? a.signalen.map(signaalRij).join('') : '<li class="leeg">niets dat aandacht vraagt 🙂</li>') + '</ul>';
   } else if (L2open === 'boodschappen' || L2open === 'acties'){

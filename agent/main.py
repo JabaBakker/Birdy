@@ -84,7 +84,9 @@ async def scheduler(brain: Brain, adapters: list) -> None:
         ("digest", cfg.digest_time, "digest.md", "ochtendbriefing"),
         ("weekly", cfg.weekly_time, "weekly.md", "weekplanning"),
         ("proactive", cfg.proactive_time, "proactive.md", "eigen initiatief"),
+        ("aandacht", cfg.aandacht_time, "aandacht.md", "aandachtspunten (stil)"),
     ]
+    stil = {"proactive", "aandacht"}  # geen chatbericht, geen foutmelding bij uitval
     last_inbox_check = datetime.min
     while True:
         now = datetime.now()
@@ -95,7 +97,11 @@ async def scheduler(brain: Brain, adapters: list) -> None:
                 log.info("vast moment: %s", label)
                 async with work_lock:
                     reply = await brain.run(prompt, label)
-                if reply is None and name != "proactive":
+                if name == "aandacht":
+                    if reply is None:
+                        log.warning("aandachtspunten bijwerken mislukt")
+                    continue  # antwoord blijft in AANDACHT.md, niet in de chat
+                if reply is None and name not in stil:
                     # Geen stille uitval (FR-F3): een mislukte briefing melden we zelf.
                     reply = (
                         f"⚠️ De {label} is zojuist mislukt. Ik probeer het morgen gewoon "

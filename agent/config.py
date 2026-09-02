@@ -73,6 +73,8 @@ class Config:
     # Vaste momenten (lokale tijd, HH:MM). Leeg = uit.
     digest_time: str = field(default_factory=lambda: os.environ.get("AGENT_DIGEST_TIME", "07:15"))
     weekly_time: str = field(default_factory=lambda: os.environ.get("AGENT_WEEKLY_TIME", "SUN 19:30"))
+    # stil ochtendmoment: alleen AANDACHT.md (dashboard) bijwerken, geen chatbericht
+    aandacht_time: str = field(default_factory=lambda: os.environ.get("AGENT_AANDACHT_TIME", "07:15"))
     # leeg = uit (standaard sinds 2 sep 2026: uitzoekwerk liever op verzoek dan dagelijks)
     proactive_time: str = field(default_factory=lambda: os.environ.get("AGENT_PROACTIVE_TIME", ""))
 
