@@ -66,6 +66,10 @@ def _agenda_bereik(van: datetime, tot: datetime, zoek: str = "") -> tuple[list[d
                 org = ev.get("organizer", {}) or {}
                 naam = (org.get("displayName") or wie.get("displayName")
                         or wie.get("email") or org.get("email") or "")
+                # door Birdy gesynchroniseerde feed (bijv. "Volleybal Yvette") → label als bron,
+                # zodat het dashboard op de persoonsnaam in het label kan kleuren
+                sync_label = ((ev.get("extendedProperties") or {}).get("private") or {}).get("birdy_sync", "")
+                bron = f"{sync_label} · automatisch in de gezinsagenda" if sync_label else "Gezinsagenda (Google)"
                 def lokaal(v: str) -> str:  # dateTime met offset → NL-wandkloktijd
                     if "T" in v:
                         return gcal._lokaal(datetime.fromisoformat(v)).strftime("%Y-%m-%dT%H:%M")
@@ -78,7 +82,7 @@ def _agenda_bereik(van: datetime, tot: datetime, zoek: str = "") -> tuple[list[d
                     "omschrijving": (ev.get("description") or "")[:600],
                     "locatie": ev.get("location", ""),
                     "wie": naam.replace("bakkerbirdy@gmail.com", "Birdy"),
-                    "bron": "Gezinsagenda (Google)",
+                    "bron": bron,
                 })
             google_ok = True
     except BaseException:  # SystemExit van de CLI-helpers telt ook
