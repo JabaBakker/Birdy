@@ -14,7 +14,7 @@
 - **Persoonlijke dingen en alles voor de kinderen wegen extra zwaar bij "belangrijk"**
   (verjaardagen, school, gezondheid, beloftes aan de kinderen). Een klusje voor het huis
   verliest het van een belofte aan een kind.
-- Gebruik deze indeling in OVERZICHT.md én in de ochtendbriefing.
+- Gebruik deze indeling in het Doc "Wat loopt er", je aandachtspunten en de weekplanning.
 
 ## Toon & vorm
 

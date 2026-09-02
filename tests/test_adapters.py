@@ -20,8 +20,6 @@ sys.modules["claude_agent_sdk"] = sdk
 
 os.environ.update({
     "ANTHROPIC_API_KEY": "test",
-    "TELEGRAM_BOT_TOKEN": "123456:TEST",
-    "TELEGRAM_ALLOWED_CHAT_IDS": "-100",
     "SLACK_BOT_TOKEN": "xoxb-test",
     "SLACK_APP_TOKEN": "xapp-test",
     "SLACK_ALLOWED_MEMBER_IDS": "U_JAAP,U_YVETTE",
@@ -34,7 +32,6 @@ Path(os.environ["AGENT_WORKSPACE"]).mkdir(exist_ok=True)
 from agent import main as agent_main            # noqa: E402
 from agent.config import Config                 # noqa: E402
 from agent.slack_adapter import SlackAdapter    # noqa: E402
-from agent.telegram_adapter import TelegramAdapter  # noqa: E402
 from datetime import datetime                   # noqa: E402
 
 
@@ -65,8 +62,8 @@ class Tests(unittest.IsolatedAsyncioTestCase):
     def test_imports_en_constructie(self):
         cfg = Config()
         brain = FakeBrain()
-        TelegramAdapter(cfg, brain, asyncio.Lock())   # bouwt PTB Application
         SlackAdapter(cfg, brain, asyncio.Lock())      # bouwt Bolt AsyncApp
+        cfg.validate()  # Slack-tokens aanwezig → geen SystemExit
         self.assertEqual(cfg.slack_allowed_member_ids, ["U_JAAP", "U_YVETTE"])
 
     def test_due(self):

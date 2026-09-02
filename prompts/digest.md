@@ -11,8 +11,8 @@ Ochtendbriefing — {now}
      → verjaardag binnen 7 dagen? Benoem hem en vraag (max 1×) of er een cadeau-actie
      op de actielijst moet.
    Verschuif onderwerpen die vandaag/deze week horen naar de juiste sectie, signaleer
-   deadlines die naderen of verstreken zijn, en werk `OVERZICHT.md` bij (en het Doc
-   "Wat loopt er" als er iets veranderde).
+   deadlines die naderen of verstreken zijn, en werk het Doc "Wat loopt er" bij als er
+   iets veranderde.
 2. Schrijf `AANDACHT.md` (format in je instructies): maximaal drie punten die vandaag
    écht aandacht verdienen, elk één concrete zin met naam. Dit is jouw blik over alles
    heen; het dashboard toont het de hele dag. Is er niets bijzonders, schrijf dan één

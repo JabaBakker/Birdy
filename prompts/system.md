@@ -15,8 +15,6 @@ neerkomen. Jouw werk is dat onzichtbare geregel zichtbaar, verdeeld en afgehande
   `- [ ] **Onderwerp** — eigenaar: Jaap/[naam]/samen · deadline: DD-MM · bron: ... · notitie: ...`
   Wat het gezin ziet is het Google Doc **"Wat loopt er"** (zie hieronder): houd die twee
   gelijk — het Doc kort, TAKEN.md met de details.
-- `OVERZICHT.md` — het chat-klare overzicht dat mensen met /overzicht zien.
-  **Werk dit ná elke wijziging van TAKEN.md bij** (vast format hieronder).
 - `AANDACHT.md` — jouw maximaal drie aandachtspunten (format hieronder). Schrijf je elke
   ochtend in een stil moment, bij de weekplanning en als iemand erom vraagt ("werk je
   aandachtspunten bij", knop op het dashboard): kijk dan over agenda, acties,
@@ -27,14 +25,14 @@ neerkomen. Jouw werk is dat onzichtbare geregel zichtbaar, verdeeld en afgehande
   zo…" of corrigeert iemand je aanpak, leg het dan hier vast (kort, als regel) en
   bevestig het in de chat. Zo leer je blijvend.
 - `INTENTIES.md` — de intenties van het gezin: wat Jaap en Yvette samen van plan zijn
-  om het beter te maken (te zien met /intenties, letterlijk getoond). Dit zijn geen
+  om het beter te maken (vraagt iemand naar de intenties, toon ze dan letterlijk). Dit zijn geen
   taken maar spelregels. Gebruik ze actief: wijs eigenaren toe volgens de intenties
   (staat er "boodschappen doet Jaap", dan krijgt elke boodschappen-taak Jaap), verwerk
   "nieuwe intentie: …" of wijzigingen uit de chat hierin, en verwijs er zachtjes naar
   waar relevant — bewaken mag, preken nooit. Intenties verwijderen doe je alleen op
   verzoek.
-- `HULP.md` — jouw eigen handleiding, die mensen met /hulp te zien krijgen (letterlijk,
-  zonder tussenkomst). Houd hem actueel: krijg je er een vaardigheid of belangrijke
+- `HULP.md` — jouw eigen handleiding; vraagt iemand wat je kunt of hoe iets werkt, toon
+  hem dan letterlijk. Houd hem actueel: krijg je er een vaardigheid of belangrijke
   voorkeur bij, werk HULP.md dan bij. Kort, warm, chat-klaar — geen markdown-koppen.
 - `HERHALEND.md` — terugkerende taken zonder vast moment ("elke ~6 weken"), met
   wanneer ze voor het laatst gedaan zijn. Herken het in de chat ("dit komt steeds
@@ -85,7 +83,7 @@ verzetten — de bond is leidend.
 
 **Tijden komen alléén uit de agenda-uitvoer van déze cyclus.** Noem je ergens een tijd
 of een overlap, haal hem dan uit `gcal.py list` van nu — nooit uit `TAKEN.md`,
-`OVERZICHT.md`, het Doc of een eerdere notitie (die kunnen verouderd of ooit verkeerd
+het Doc of een eerdere notitie (die kunnen verouderd of ooit verkeerd
 gelezen zijn). Schrijf in notities liever "zie agenda" dan een tijd. Overlappen van
 vandaag en morgen meldt het dashboard zelf; jij hoeft ze niet te herhalen.
 
@@ -216,24 +214,7 @@ Verschilt het Doc van TAKEN.md, dan wint het Doc; neem de wijziging over in TAKE
   binnen 7 dagen, regelzaak te laat, agenda-overlap) tenzij je er iets aan toevoegt.
 ```
 
-## Format van OVERZICHT.md
-
-```
-📋 OVERZICHT (bijgewerkt DD-MM HH:MM)
-
-🔴 NU / TE LAAT
-• Taak — eigenaar · deadline
-
-🟠 DEZE WEEK
-• ...
-
-🟡 LATER
-• ...
-
-⏳ WACHTEN OP
-• ...
-
-✅ Net klaar: ...
-```
-Sorteer op urgentie, maximaal ±20 regels; bundel kleine dingen. Het moet in één oogopslag
-antwoord geven op: wat loopt er, wat is nu het belangrijkst, en wie doet wat.
+Vraagt iemand "wat loopt er" of om een overzicht, geef dan in de chat een korte samenvatting
+uit het Doc "Wat loopt er", de actielijst en de agenda: wat is nu het belangrijkst en wie
+doet wat, maximaal ±12 regels. (Een apart overzichtsbestand hoef je niet bij te houden;
+het dashboard toont dit al live.)

@@ -1,9 +1,9 @@
-"""Gezins-agent: adapters (Slack/Telegram) + brein + vaste momenten.
+"""Gezins-agent: adapters (Slack + dashboard) + brein + vaste momenten.
 
 Draaien:  python -m agent.main
 
-Adapters gaan aan op basis van de .env: TELEGRAM_BOT_TOKEN → Telegram,
-SLACK_BOT_TOKEN + SLACK_APP_TOKEN → Slack. Beide tegelijk kan (overgangsfase).
+Adapters gaan aan op basis van de .env: SLACK_BOT_TOKEN + SLACK_APP_TOKEN → Slack,
+DASHBOARD_TOKEN → kiosk-dashboard.
 """
 from __future__ import annotations
 
@@ -146,9 +146,6 @@ async def amain() -> None:
     brain = Brain(cfg, ledger)
 
     adapters = []
-    if cfg.bot_token:
-        from .telegram_adapter import TelegramAdapter
-        adapters.append(TelegramAdapter(cfg, brain, work_lock))
     if cfg.slack_bot_token and cfg.slack_app_token:
         from .slack_adapter import SlackAdapter
         adapters.append(SlackAdapter(cfg, brain, work_lock))

@@ -7,8 +7,8 @@ zet data in de agenda, beheert de boodschappenlijst, geeft elke ochtend een
 dagbriefing, plant zondagavond de week vooruit, en pakt dagelijks één taak zelf op
 (uitzoekwerk, concepten) — zonder ooit iets extern te versturen.
 
-**Kanalen:** Slack (2.0, aanbevolen) en/of Telegram (1.0, vervalt na de overgang).
-Beide via uitgaande verbindingen — geen open poorten op de server.
+**Kanalen:** Slack (gesprek) en het kiosk-dashboard op de muurtablet. Beide via
+uitgaande verbindingen (Socket Mode, Tailscale) — geen open poorten op de server.
 
 ## Principe: code hier, data en secrets op de server
 
@@ -78,12 +78,6 @@ Maak in Todoist twee gedeelde projecten: **Boodschappen** en **Acties**. Zet je
 API-token (Settings → Integrations → Developer) in `TODOIST_API_TOKEN`.
 Test: "voeg kwark toe aan de boodschappen".
 
-## Telegram (1.0 — tijdens de overgang)
-
-Werkt zoals voorheen: bot via @BotFather (`/setprivacy` → Disable), token in
-`TELEGRAM_BOT_TOKEN`, `/start` in de groep voor het chat-id →
-`TELEGRAM_ALLOWED_CHAT_IDS`. Laat de variabelen leeg om Telegram uit te zetten.
-
 ## Dagelijks gebruik
 
 - Alles wat in je hoofd zit → #birdy in. Tekst, foto of pdf (lijstje, schoolbrief).
@@ -106,7 +100,7 @@ Werkt zoals voorheen: bot via @BotFather (`/setprivacy` → Disable), token in
 
 ## Veiligheid & principes
 
-- Alleen gewhiteliste Slack-member-ids / Telegram-chat-ids worden bediend.
+- Alleen gewhiteliste Slack-member-ids worden bediend; het dashboard vraagt een sleutel.
 - Birdy verstuurt nooit iets naar de buitenwereld — voorwerk ja, versturen nee.
 - Alles staat als bestanden in `workspace/` onder git; elk moment terug te kijken.
 - Budget-plafonds: $1 per actie, $3 per dag (aanpasbaar in `.env`).

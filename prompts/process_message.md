@@ -14,9 +14,8 @@ Verwerk dit bericht:
 2. Werk `TAKEN.md` bij: nieuwe onderwerpen (eigenaar + deadline!), afvinken wat klaar
    gemeld wordt, aanvullen wat verduidelijkt wordt. Nieuwe weetjes over het gezin →
    `GEZIN.md`. Kleine concrete acties en boodschappen gaan naar Todoist, niet hierheen.
-3. Is er iets aan de onderwerpen veranderd, werk dan `OVERZICHT.md` én het Doc
-   "Wat loopt er" bij (alleen Todoist geraakt → beide overslaan). Zet één logregel in
-   het journaal van vandaag.
+3. Is er iets aan de onderwerpen veranderd, werk dan het Doc "Wat loopt er" bij (alleen
+   Todoist geraakt → overslaan). Zet één logregel in het journaal van vandaag.
 4. Antwoord kort en warm in het Nederlands (1–6 regels): wat je hebt genoteerd of gedaan,
    met eigenaar en datum, plus hoogstens één korte terugvraag als iets echt onduidelijk is.
 

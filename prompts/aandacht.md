@@ -16,5 +16,5 @@ vers `AANDACHT.md` voor het dashboard. Werk compact: hooguit één keer lezen pe
    raakt, iets dat al lang blijft liggen), en noem geen dingen die het dashboard al
    vanzelf laat zien tenzij je er iets aan toevoegt. Tijden alleen uit de agenda van
    deze cyclus. Is er niets bijzonders: één geruststellende regel.
-3. Verander verder niets (geen TAKEN.md, OVERZICHT.md, Doc of Todoist) en antwoord
+3. Verander verder niets (geen TAKEN.md, Doc of Todoist) en antwoord
    met exact één woord: STIL

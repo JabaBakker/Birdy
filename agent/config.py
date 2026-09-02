@@ -31,15 +31,6 @@ class Config:
         default_factory=lambda: Path(os.environ.get("AGENT_PROMPTS_DIR", REPO_ROOT / "prompts"))
     )
 
-    # Telegram
-    bot_token: str = field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
-    # Komma-gescheiden chat-ids die de bot mag bedienen. Leeg = setup-modus:
-    # de bot antwoordt dan alleen op /start met het chat-id, zodat je het kunt invullen.
-    allowed_chat_ids: list[int] = field(default_factory=lambda: [
-        int(x) for x in os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "").replace(" ", "").split(",")
-        if x.strip().lstrip("-").isdigit()
-    ])
-
     # Slack (Socket Mode). Beide tokens gezet = Slack-adapter aan.
     slack_bot_token: str = field(default_factory=lambda: os.environ.get("SLACK_BOT_TOKEN", ""))
     slack_app_token: str = field(default_factory=lambda: os.environ.get("SLACK_APP_TOKEN", ""))
@@ -89,12 +80,8 @@ class Config:
     def validate(self) -> None:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             raise SystemExit("ANTHROPIC_API_KEY ontbreekt in .env")
-        slack_ok = bool(self.slack_bot_token and self.slack_app_token)
-        if not self.bot_token and not slack_ok:
-            raise SystemExit(
-                "Geen kanaal geconfigureerd: zet TELEGRAM_BOT_TOKEN en/of "
-                "SLACK_BOT_TOKEN + SLACK_APP_TOKEN in .env"
-            )
+        if not (self.slack_bot_token and self.slack_app_token):
+            raise SystemExit("Geen kanaal geconfigureerd: zet SLACK_BOT_TOKEN + SLACK_APP_TOKEN in .env")
         if self.slack_bot_token and not self.slack_app_token:
             raise SystemExit("SLACK_APP_TOKEN ontbreekt (Socket Mode vereist een xapp-token)")
         if not self.workspace.exists():
