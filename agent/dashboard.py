@@ -1507,14 +1507,18 @@ function actiesGroepen(items, max){
   else if (over > 0) html += `<ul><li class="leeg klik" onclick="openL2('acties')">… nog ${over} — alles ↗</li></ul>`;
   return html;
 }
-function actiesRing(open, af){
-  const totaal = open + af, pct = totaal ? af / totaal : 0;
+function actiesRing(items, afgevinkt){
+  // per week: afgevinkt in de laatste 7 dagen tegenover wat deze week op de rol staat
+  // (over datum, vandaag of binnen 7 dagen); acties zonder datum of verder weg tellen niet mee
+  const nu = new Date(); nu.setHours(0,0,0,0);
+  const dezeWeek = items.filter(x => x.due && Math.round((new Date(x.due + 'T00:00') - nu) / 86400000) <= 7).length;
+  const af = afgevinkt.length, totaal = dezeWeek + af, pct = totaal ? af / totaal : 0;
   const omtrek = 2 * Math.PI * 25;
   document.getElementById('ringVol').style.strokeDasharray = `${pct * omtrek} ${omtrek}`;
   document.getElementById('ringGetal').textContent = af;
-  document.getElementById('ringTekst').innerHTML = `<b>${af} van ${totaal} afgerond</b><small>` +
-    (totaal === 0 ? 'niets te doen 🎉' : af === 0 ? 'nog niets afgevinkt deze week' : pct >= 1 ? 'alles af! 🎉'
-     : pct >= .5 ? 'goed bezig! 💪' : 'op weg') + '</small>';
+  document.getElementById('ringTekst').innerHTML = `<b>${af} van ${totaal} deze week</b><small>` +
+    (totaal === 0 ? 'niets op de rol 🎉' : af === 0 ? 'nog niets afgevinkt' : pct >= 1 ? 'alles af! 🎉'
+     : pct >= .5 ? 'goed bezig! 💪' : `nog ${dezeWeek} te doen`) + '</small>';
 }
 function ico(titel, bron){
   const t = (titel + ' ' + (bron || '')).toLowerCase();
@@ -2111,7 +2115,7 @@ async function ververs(){
         (mo.length > 3 ? `<li class="meer">… nog ${mo.length - 3}</li>` : '')
       : '<li class="leeg">niets lopends 🎉</li>';
     document.getElementById('acties').innerHTML = actiesGroepen(d.acties || [], 40);
-    actiesRing((d.acties || []).length, (d.acties_af || []).length);
+    actiesRing(d.acties || [], d.acties_af || []);
     const afWrap = document.getElementById('actiesAfWrap');
     afWrap.style.display = (d.acties_af && d.acties_af.length) ? 'block' : 'none';
     document.getElementById('actiesAf').innerHTML = (d.acties_af || []).map(afRij).join('');
