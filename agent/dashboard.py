@@ -32,24 +32,34 @@ CACHE_TTL = 120  # seconden
 
 
 def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
-    """Afspraken mét eindtijd, voor de weekweergave: ([{start, eind, titel, …}], compleet).
+    """Afspraken mét eindtijd voor de komende `days` dagen (Vandaag-tab en weekcache)."""
+    now = datetime.now()
+    return _agenda_bereik(now, now + timedelta(days=days))
+
+
+def _agenda_bereik(van: datetime, tot: datetime, zoek: str = "") -> tuple[list[dict], bool]:
+    """Afspraken uit beide bronnen in [van, tot): ([{start, eind, titel, …}], compleet).
+    `zoek` filtert op titel/omschrijving/locatie (Google zoekt zelf, FamilyWall lokaal).
     compleet=False als een bron faalde — dan is het resultaat mogelijk (deels) leeg en
     houdt de cache liever de vorige complete versie vast."""
     events: list[dict] = []
     google_ok = not os.environ.get("GOOGLE_CALENDAR_ID")
     fw_ok = not os.environ.get("FAMILYWALL_ICS_URL")
+    zoek = zoek.strip().lower()
     try:
         from . import gcal
         if os.environ.get("GOOGLE_CALENDAR_ID"):
             svc = gcal._service()
-            now = datetime.now()
-            resp = svc.events().list(
+            params = dict(
                 calendarId=os.environ["GOOGLE_CALENDAR_ID"],
-                timeMin=now.astimezone().isoformat(),
-                timeMax=(now + timedelta(days=days)).astimezone().isoformat(),
-                singleEvents=True, orderBy="startTime", maxResults=60,
+                timeMin=van.astimezone().isoformat(),
+                timeMax=tot.astimezone().isoformat(),
+                singleEvents=True, orderBy="startTime", maxResults=120 if zoek else 60,
                 timeZone="Europe/Amsterdam",  # anders komt alles in UTC (2 uur te vroeg)
-            ).execute()
+            )
+            if zoek:
+                params["q"] = zoek
+            resp = svc.events().list(**params).execute()
             for ev in resp.get("items", []):
                 s, e = ev.get("start", {}), ev.get("end", {})
                 wie = ev.get("creator", {}) or {}
@@ -83,7 +93,6 @@ def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
             resp = requests.get(url, timeout=30)
             resp.raise_for_status()
             cal = icalendar.Calendar.from_ical(resp.content)
-            now = datetime.now()
 
             from . import gcal
 
@@ -92,9 +101,12 @@ def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
                     return gcal._lokaal(v).strftime("%Y-%m-%dT%H:%M")
                 return v.strftime("%Y-%m-%d") if v else ""
 
-            for ev in recurring_ical_events.of(cal).between(now, now + timedelta(days=days)):
+            for ev in recurring_ical_events.of(cal).between(van, tot):
                 start = ev.get("DTSTART").dt
                 eind = ev.get("DTEND")
+                if zoek and zoek not in " ".join(str(ev.get(k, "")) for k in
+                                                 ("SUMMARY", "DESCRIPTION", "LOCATION")).lower():
+                    continue
                 events.append({
                     "id": "",  # alleen-lezen: FamilyWall-afspraken kunnen niet verzet worden
                     "start": iso(start),
@@ -116,7 +128,7 @@ def _agenda_rijk(days: int = 7) -> tuple[list[dict], bool]:
             continue
         seen.add(key)
         uniek.append(ev)
-    return uniek[:60], google_ok and fw_ok
+    return uniek[:200 if zoek else 60], google_ok and fw_ok
 
 
 def _agenda_compact(rijk: list[dict]) -> list[dict]:
@@ -530,6 +542,7 @@ class Dashboard:
         self._traag: dict | None = None  # langzame bronnen (agenda/FamilyWall/Drive), eigen cache
         self._traag_ts = 0.0
         self._bouw_lock = asyncio.Lock()
+        self._agenda_cache: dict[tuple, tuple[float, list]] = {}  # /api/agenda: (van,tot,zoek) → (ts, events)
         self._runner: web.AppRunner | None = None
 
     def _invalidate(self, ook_traag: bool = False) -> None:
@@ -544,6 +557,7 @@ class Dashboard:
         app = web.Application()
         app.router.add_get("/", self.page)
         app.router.add_get("/api/overview", self.overview)
+        app.router.add_get("/api/agenda", self.agenda)
         app.router.add_post("/api/message", self.message)
         app.router.add_post("/api/done", self.done)
         app.router.add_post("/api/add", self.add)
@@ -717,6 +731,39 @@ class Dashboard:
                             t["due"] = datum
         return web.json_response({"ok": ok}, status=200 if ok else 502)
 
+    async def agenda(self, request: web.Request) -> web.Response:
+        """Weekweergave buiten de komende 7 dagen (?van=JJJJ-MM-DD&tot=JJJJ-MM-DD) of zoeken
+        (?zoek=term, 3 maanden terug t/m 18 maanden vooruit). Eigen cache van 2 minuten."""
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        zoek = request.query.get("zoek", "").strip()[:80]
+        try:
+            if zoek:
+                vandaag = date.today()
+                van, tot = vandaag - timedelta(days=90), vandaag + timedelta(days=548)
+            else:
+                van = date.fromisoformat(request.query.get("van", ""))
+                tot = date.fromisoformat(request.query.get("tot", ""))
+            if not (timedelta(0) < tot - van <= timedelta(days=640)):  # zoekvenster = 90 + 548
+                raise ValueError
+        except ValueError:
+            return web.json_response({"error": "van/tot (JJJJ-MM-DD) of zoek ontbreekt"}, status=400)
+        sleutel = (van.isoformat(), tot.isoformat(), zoek.lower())
+        nu = time.time()
+        hit = self._agenda_cache.get(sleutel)
+        if hit and nu - hit[0] <= CACHE_TTL:
+            events = hit[1]
+        else:
+            events, compleet = await asyncio.to_thread(
+                _agenda_bereik, datetime.combine(van, datetime.min.time()),
+                datetime.combine(tot, datetime.min.time()), zoek)
+            if compleet:
+                self._agenda_cache[sleutel] = (nu, events)
+                if len(self._agenda_cache) > 40:  # niet eindeloos groeien
+                    oudste = min(self._agenda_cache, key=lambda k: self._agenda_cache[k][0])
+                    del self._agenda_cache[oudste]
+        return web.json_response({"events": events, "van": van.isoformat(), "tot": tot.isoformat()})
+
     async def verzet(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
             return web.json_response({"error": "geen toegang"}, status=401)
@@ -738,6 +785,7 @@ class Dashboard:
         if ok:
             self._gen += 1
             self._cache = None  # agenda-compact opnieuw opbouwen (uit gepatchte week)
+            self._agenda_cache = {}  # andere weken/zoekresultaten opnieuw ophalen
             if self._traag:
                 for e in self._traag["week"]:
                     if e.get("id") == event_id:
@@ -894,6 +942,16 @@ PAGE = """<!doctype html>
   #jarig li b { color:var(--amber); }
   /* ── weekweergave ── */
   #paneelWeek { display:none; }
+  .wknav { display:flex; align-items:center; gap:.45rem; margin:0 .2rem .6rem; flex-wrap:wrap; }
+  .wknav button { border:1px solid var(--lijn); background:var(--panel); color:var(--ink);
+                  border-radius:9px; padding:.35rem .8rem; font-size:1rem; cursor:pointer; }
+  .wknav button.nu { font-size:.85rem; }
+  .wknav button:active { border-color:var(--accent); }
+  .wknav #wkLabel { font-size:.9rem; color:var(--dim); margin-left:.3rem; }
+  .wknav input { margin-left:auto; min-width:min(300px,100%); background:var(--panel);
+                 border:1px solid var(--lijn); color:var(--ink); border-radius:9px;
+                 padding:.4rem .7rem; font-size:.9rem; outline:none; }
+  .wknav input:focus { border-color:var(--accent); }
   .wkwrap { overflow-x:auto; }
   .wk { display:grid; grid-template-columns:2.6rem repeat(7, minmax(120px,1fr)); gap:.35rem;
         min-width:920px; }
@@ -1239,6 +1297,14 @@ PAGE = """<!doctype html>
     </div>
   </div>
   <div id="paneelWeek">
+    <div class="wknav">
+      <button onclick="weekStap(-1)" title="vorige week">‹</button>
+      <button class="nu" onclick="weekStap(0)">Vandaag</button>
+      <button onclick="weekStap(1)" title="volgende week">›</button>
+      <span id="wkLabel"></span>
+      <input id="wkZoek" placeholder="🔍 zoek in de agenda… (bijv. tandarts)" enterkeyhint="search"
+        onkeydown="if(event.key==='Enter'){zoekAgenda(this.value);this.blur();}">
+    </div>
     <div class="wkwrap"><div class="wk" id="wkgrid"></div></div>
     <div class="legenda" id="legenda"></div>
   </div>
@@ -1466,6 +1532,7 @@ function renderL2(){
   if (!L2open || !DATA) return;
   document.getElementById('l2Titel').textContent = {
     onderwerpen: '📂 Onderwerpen — wat loopt er', aandacht: '💡 Aandacht',
+    zoek: '🔍 Zoeken in de agenda',
     boodschappen: '🛒 Boodschappen',
     acties: '⚡ Acties — alles', verjaardagen: '🎂 Verjaardagen & cadeau-ideeën',
     regelzaken: '🔁 Regelzaken — huishoudhandboek', thuis: '🏠 Thuis — via Homey',
@@ -1527,6 +1594,23 @@ function renderL2(){
       `</span></li>`).join('')
       : '<li class="leeg">niets voor dit filter</li>') + '</ul>';
     html += `<p class="notitie" style="margin-top:.8rem">Uit het Google Doc “Wat loopt er” in de Drive-map — Birdy houdt het bij; zelf aanpassen mag ook.</p>`;
+  } else if (L2open === 'zoek'){
+    const z = ZOEK;
+    html = `<p class="notitie">“${esc(z.term)}” · 3 maanden terug t/m 18 maanden vooruit</p>`;
+    if (z.items === null) html += '<p class="leeg">zoeken…</p>';
+    else if (z.fout) html += '<p class="leeg">zoeken lukte even niet</p>';
+    else if (!z.items.length) html += '<p class="leeg">niets gevonden</p>';
+    else {
+      const vandaag = isoDag(weekStart(0));
+      html += '<ul>' + z.items.map((e, i) => {
+        const dag = e.start.slice(0,10), voorbij = dag < vandaag;
+        const tijd = e.start.length > 10 ? e.start.slice(11,16) + ((e.eind && e.eind.length > 10) ? '–' + e.eind.slice(11,16) : '') : 'hele dag';
+        const k = kleurVoor(e.titel);
+        return `<li class="signaal" style="${voorbij ? 'opacity:.55' : ''}" onclick='gaNaar(ZOEK.items[${i}])'>` +
+          `<small style="flex:0 0 7.5rem">${esc(new Date(dag + 'T00:00').toLocaleDateString('nl-NL', { weekday:'short', day:'numeric', month:'short', year: dag.slice(0,4) !== vandaag.slice(0,4) ? 'numeric' : undefined }))}</small>` +
+          `<span><b style="color:${k}">${esc(e.titel)}</b> <span class="notitie">· ${tijd}${e.locatie ? ' · ' + esc(e.locatie) : ''}${e.bron === 'FamilyWall' ? ' · FamilyWall' : ''}</span></span></li>`;
+      }).join('') + '</ul>';
+    }
   } else if (L2open === 'aandacht'){
     const a = DATA.aandacht || { birdy: { items: [] }, signalen: [] };
     const b = a.birdy || { items: [] };
@@ -1605,17 +1689,67 @@ function persChip(tekst){
 }
 const U0 = 7, U1 = 22, HOOG = 510, PPU = HOOG / (U1 - U0);
 function minuten(iso){ return parseInt(iso.slice(11,13),10)*60 + parseInt(iso.slice(14,16),10); }
+// ── weken bladeren + zoeken (buiten de komende 7 dagen via /api/agenda) ──
+let WEEKOFFSET = 0;  // 0 = de lopende week (vanaf vandaag), ±n = n weken verder/terug
+function weekStart(offset){
+  const s = new Date(); s.setHours(0,0,0,0); s.setDate(s.getDate() + 7 * (offset ?? WEEKOFFSET));
+  return s;
+}
+function isoDag(d){ return d.toLocaleDateString('sv-SE'); }
+async function weekStap(richting){
+  WEEKOFFSET = richting === 0 ? 0 : WEEKOFFSET + richting;
+  await weekLaad();
+}
+async function weekLaad(){
+  if (WEEKOFFSET === 0){ WEEK = (DATA && DATA.week) || []; renderWeek(WEEK); return; }
+  const van = weekStart(), tot = new Date(van); tot.setDate(tot.getDate() + 7);
+  document.getElementById('wkLabel').textContent = 'laden…';
+  try {
+    const r = await fetch(`/api/agenda?van=${isoDag(van)}&tot=${isoDag(tot)}`, { headers: { 'X-Dashboard-Key': KEY } });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'fout');
+    WEEK = d.events || []; renderWeek(WEEK);
+  } catch(e){ toon('Agenda ophalen lukte even niet.'); renderWeek(WEEK); }
+}
+async function zoekAgenda(term){
+  term = (term || '').trim(); if (term.length < 2) return;
+  openL2('zoek'); ZOEK = { term, items: null };
+  renderL2();
+  try {
+    const r = await fetch(`/api/agenda?zoek=${encodeURIComponent(term)}`, { headers: { 'X-Dashboard-Key': KEY } });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'fout');
+    ZOEK = { term, items: d.events || [] };
+  } catch(e){ ZOEK = { term, items: [], fout: true }; }
+  renderL2();
+}
+let ZOEK = { term: '', items: null };
+async function gaNaar(ev){
+  // spring naar de week van deze afspraak en open de detailkaart
+  const dag = new Date(ev.start.slice(0,10) + 'T00:00'); const nu = weekStart(0);
+  WEEKOFFSET = Math.floor((dag - nu) / (7 * 86400000));
+  sluitL2(); kiesTab('week');
+  await weekLaad();
+  const i = WEEK.findIndex(e => e.start === ev.start && e.titel === ev.titel);
+  if (i >= 0) detailEv(i);
+}
 function renderWeek(events){
   const grid = document.getElementById('wkgrid');
-  const delen = bouwWeek(events);
+  const delen = bouwWeek(events, weekStart());
   grid.innerHTML = delen;
+  const van = weekStart(), tot = new Date(van); tot.setDate(tot.getDate() + 6);
+  const f = d => d.toLocaleDateString('nl-NL', { day:'numeric', month:'short' });
+  document.getElementById('wkLabel').textContent =
+    (WEEKOFFSET === 0 ? 'komende 7 dagen' : `${f(van)} – ${f(tot)}`) +
+    (WEEKOFFSET ? ` · ${WEEKOFFSET > 0 ? '+' : ''}${WEEKOFFSET} ${Math.abs(WEEKOFFSET) === 1 ? 'week' : 'weken'}` : '');
   const leg = document.getElementById('legenda');
   leg.innerHTML = PERSONEN.map((p,i) =>
     `<span><i style="background:${KLEUREN[i%KLEUREN.length]}"></i>${esc(p)}</span>`).join('') +
     `<span><i style="background:#5b6570"></i>overig</span><span>⚠ rode rand = overlap</span>`;
 }
-function bouwWeek(events){
-  const dagen = {}; const start = new Date(); start.setHours(0,0,0,0);
+function bouwWeek(events, start){
+  const dagen = {}; start = start || weekStart(0);
+  const vandaagKey = isoDag(weekStart(0));
   const volgorde = [];
   for (let i = 0; i < 7; i++){
     const d = new Date(start); d.setDate(d.getDate() + i);
@@ -1630,9 +1764,10 @@ function bouwWeek(events){
   let html = '<div></div>';
   volgorde.forEach((key, i) => {
     const g = dagen[key];
-    const label = i === 0 ? 'Vandaag'
-      : g.datum.toLocaleDateString('nl-NL', { weekday:'short', day:'numeric' });
-    html += `<div class="kop${i===0?' vandaag':''}">${label}</div>`;
+    const isVandaag = key === vandaagKey;
+    const label = isVandaag ? 'Vandaag'
+      : g.datum.toLocaleDateString('nl-NL', { weekday:'short', day:'numeric', month: i === 0 || g.datum.getDate() === 1 ? 'short' : undefined });
+    html += `<div class="kop${isVandaag?' vandaag':''}">${label}</div>`;
   });
   html += '<div></div>';
   volgorde.forEach(key => {
@@ -1776,9 +1911,8 @@ async function ververs(){
     document.getElementById('klok').textContent = d.nu;
     DATA = d;
     PERSONEN = d.personen || [];
-    WEEK = d.week || [];
     document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
-    renderWeek(WEEK);
+    if (WEEKOFFSET === 0){ WEEK = d.week || []; renderWeek(WEEK); }  // andere week: laten staan
     // aandacht: eerst Birdy's punten (herkenbaar), dan de regel-signalen; samen max 5
     const a = d.aandacht || { birdy: { items: [] }, signalen: [] };
     const birdyRows = ((a.birdy && a.birdy.items) || []).map(x =>

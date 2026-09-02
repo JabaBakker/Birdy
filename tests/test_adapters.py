@@ -189,6 +189,16 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                                  "verjaardagen"):
                         self.assertIn(veld, data)
                     self.assertEqual(data["aandacht"]["birdy"]["items"], [])
+                async with s.get("http://127.0.0.1:18811/api/agenda?van=2026-09-10",
+                                 headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)  # tot ontbreekt
+                async with s.get("http://127.0.0.1:18811/api/agenda?van=2026-09-10&tot=2026-09-17",
+                                 headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 200)
+                    self.assertEqual((await r.json())["events"], [])  # geen agenda gekoppeld
+                async with s.get("http://127.0.0.1:18811/api/agenda?zoek=tandarts",
+                                 headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 200)
                 async with s.post("http://127.0.0.1:18811/api/message",
                                   json={"text": "voeg kwark toe"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
