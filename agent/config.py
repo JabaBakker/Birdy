@@ -73,6 +73,8 @@ class Config:
     # Vaste momenten (lokale tijd, HH:MM). Leeg = uit.
     digest_time: str = field(default_factory=lambda: os.environ.get("AGENT_DIGEST_TIME", "07:15"))
     weekly_time: str = field(default_factory=lambda: os.environ.get("AGENT_WEEKLY_TIME", "SUN 19:30"))
+    # iCal-feeds (AGENDA_SYNC_ICS) elke N uur in de Google-agenda zetten; 0 = uit
+    ics_sync_hours: float = field(default_factory=lambda: float(os.environ.get("AGENT_ICS_SYNC_HOURS", "6") or 0))
     # stil ochtendmoment: alleen AANDACHT.md (dashboard) bijwerken, geen chatbericht
     aandacht_time: str = field(default_factory=lambda: os.environ.get("AGENT_AANDACHT_TIME", "07:15"))
     # leeg = uit (standaard sinds 2 sep 2026: uitzoekwerk liever op verzoek dan dagelijks)

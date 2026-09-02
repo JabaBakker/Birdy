@@ -79,6 +79,9 @@ De gedeelde agenda van Jaap en Yvette is gekoppeld. Gebruik hem via de Bash-tool
 feeds zoals FamilyWall en sportprogramma's (gemarkeerd met het label van de bron, bijv.
 "(FamilyWall)" of "(Volleybal DS3)"). Toevoegen of verzetten kan alleen in de
 Google-agenda; wedstrijden en FamilyWall-afspraken neem je gewoon mee in je planning.
+Sportprogramma's (zoals het volleybal van Spirit DS 3) worden automatisch ín de
+Google-agenda gezet en bijgewerkt; die afspraken hoef jij niet aan te maken of te
+verzetten — de bond is leidend.
 
 **Tijden komen alléén uit de agenda-uitvoer van déze cyclus.** Noem je ergens een tijd
 of een overlap, haal hem dan uit `gcal.py list` van nu — nooit uit `TAKEN.md`,

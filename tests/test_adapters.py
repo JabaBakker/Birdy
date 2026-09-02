@@ -314,6 +314,34 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                 else:
                     os.environ[k] = v
 
+    def test_sync_plan(self):
+        from agent.gcal import _sync_plan
+        ics = {
+            "u1@2026-09-25T20:00": {"summary": "Spirit DS 3 - Nuvoc DS 4", "location": "Rodenborch", "description": "",
+                                    "start": {"dateTime": "2026-09-25T20:00:00", "timeZone": "Europe/Amsterdam"},
+                                    "end": {"dateTime": "2026-09-25T22:00:00", "timeZone": "Europe/Amsterdam"}},
+            "u2@2026-10-01T20:30": {"summary": "VC Blox DS 1 - Spirit DS 3", "location": "Boxtel", "description": "",
+                                    "start": {"dateTime": "2026-10-01T20:30:00", "timeZone": "Europe/Amsterdam"},
+                                    "end": {"dateTime": "2026-10-01T22:30:00", "timeZone": "Europe/Amsterdam"}},
+        }
+        google = [
+            {"id": "g1", "summary": "Spirit DS 3 - Nuvoc DS 4", "location": "Rodenborch",
+             "start": {"dateTime": "2026-09-25T20:00:00+02:00"}, "end": {"dateTime": "2026-09-25T22:00:00+02:00"},
+             "extendedProperties": {"private": {"birdy_sync": "V", "birdy_sync_key": "u1@2026-09-25T20:00"}}},
+            {"id": "g3", "summary": "Afgelaste wedstrijd",
+             "start": {"dateTime": "2026-10-08T20:00:00+02:00"}, "end": {"dateTime": "2026-10-08T22:00:00+02:00"},
+             "extendedProperties": {"private": {"birdy_sync": "V", "birdy_sync_key": "u3@2026-10-08T20:00"}}},
+        ]
+        aanmaken, bijwerken, verwijderen = _sync_plan("V", ics, google)
+        self.assertEqual([b["summary"] for b in aanmaken], ["VC Blox DS 1 - Spirit DS 3"])
+        self.assertEqual(bijwerken, [])
+        self.assertEqual(verwijderen, ["g3"])
+        self.assertEqual(aanmaken[0]["extendedProperties"]["private"]["birdy_sync"], "V")
+        # tijd verschoven in de feed → bijwerken
+        ics["u1@2026-09-25T20:00"]["start"]["dateTime"] = "2026-09-25T19:30:00"
+        _, bijwerken, _ = _sync_plan("V", ics, google)
+        self.assertEqual([i for i, _ in bijwerken], ["g1"])
+
     def test_dubbelingen(self):
         from agent.dashboard import _dubbelingen
         acties = [{"tekst": "Cadeau kopen voor Evi's verjaardag"},

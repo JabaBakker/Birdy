@@ -4,6 +4,7 @@ De agent roept dit aan via Bash:
     python /app/agent/gcal.py list --days 7
     python /app/agent/gcal.py add "Titel" --start "2026-08-21 14:00" --duur 60
     python /app/agent/gcal.py add "Titel" --dag 2026-08-21          (hele dag)
+    python /app/agent/gcal.py sync-ics   (AGENDA_SYNC_ICS-feeds in de Google-agenda zetten)
 
 Vereist in .env: GOOGLE_CALENDAR_ID plus een Google-koppeling — bij voorkeur OAuth
 (GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN, zie scripts/google_consent.py); het oude
@@ -190,9 +191,161 @@ def cmd_add(title: str, start: str | None, dag: str | None, duur: int, jaarlijks
     print(f"Toegevoegd: {ev.get('summary')} ({ev.get('htmlLink', '')})")
 
 
+# ── iCal-feed → Google-gezinsagenda synchroniseren (bijv. Nevobo-wedstrijdprogramma) ──
+# Zo staan wedstrijden gewoon in Google Agenda (ook op ieders telefoon) en leest Birdy ze
+# als normale afspraken. Gesynchroniseerde events dragen een privé-eigenschap
+# birdy_sync=<label> + de iCal-UID; alleen die events worden aangeraakt.
+
+SYNC_PROP = "birdy_sync"
+SYNC_VENSTER_TERUG, SYNC_VENSTER_VOORUIT = 7, 400  # dagen
+
+
+def sync_feeds() -> list[tuple[str, str]]:
+    """AGENDA_SYNC_ICS="Label|url;Label|url" → feeds die ín de Google-agenda gezet worden."""
+    feeds = []
+    for item in os.environ.get("AGENDA_SYNC_ICS", "").split(";"):
+        label, _, url = item.strip().partition("|")
+        if url.strip():
+            feeds.append((label.strip(), url.strip()))
+    return feeds
+
+
+def _ics_items(url: str, van: datetime, tot: datetime) -> dict[str, dict]:
+    """Afspraken uit een iCal-feed als {sleutel: {summary, start, end, location, description}}.
+    start/end zijn dicts zoals Google ze wil ({dateTime, timeZone} of {date})."""
+    import requests
+    import icalendar
+    import recurring_ical_events
+
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    cal = icalendar.Calendar.from_ical(resp.content)
+    items: dict[str, dict] = {}
+    for ev in recurring_ical_events.of(cal).between(van, tot):
+        start = ev.get("DTSTART").dt
+        eind = ev.get("DTEND")
+        eind = eind.dt if eind else None
+        if isinstance(start, datetime):
+            s, e = _lokaal(start), _lokaal(eind) if isinstance(eind, datetime) else _lokaal(start) + timedelta(hours=2)
+            g_start = {"dateTime": s.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": TZ}
+            g_end = {"dateTime": e.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": TZ}
+            sleutel_tijd = s.strftime("%Y-%m-%dT%H:%M")
+        else:
+            g_start = {"date": start.strftime("%Y-%m-%d")}
+            g_end = {"date": (eind or start + timedelta(days=1)).strftime("%Y-%m-%d")}
+            sleutel_tijd = start.strftime("%Y-%m-%d")
+        uid = str(ev.get("UID", "")) or f"{sleutel_tijd}|{ev.get('SUMMARY', '')}"
+        # herhalende feeds: UID + begintijd is uniek per voorkomen
+        sleutel = f"{uid}@{sleutel_tijd}"
+        items[sleutel] = {
+            "summary": str(ev.get("SUMMARY", "(zonder titel)")).strip(),
+            "start": g_start, "end": g_end,
+            "location": str(ev.get("LOCATION", "")).strip(),
+            "description": str(ev.get("DESCRIPTION", "")).strip()[:1000],
+        }
+    return items
+
+
+def _sync_plan(label: str, ics: dict[str, dict], google: list[dict]) -> tuple[list, list, list]:
+    """Pure vergelijking: (aanmaken, bijwerken [(event_id, body)], verwijderen [event_id])."""
+    voettekst = f"Automatisch uit {label}. Wijzigingen in Google worden bij de volgende synchronisatie overschreven."
+
+    def body_voor(sleutel: str, it: dict) -> dict:
+        beschrijving = (it["description"] + "\n\n" if it["description"] else "") + voettekst
+        return {
+            "summary": it["summary"], "start": it["start"], "end": it["end"],
+            "location": it["location"], "description": beschrijving,
+            "extendedProperties": {"private": {SYNC_PROP: label, "birdy_sync_key": sleutel}},
+        }
+
+    def kern(b: dict) -> tuple:
+        s, e = b.get("start", {}), b.get("end", {})
+        return (b.get("summary", ""), s.get("dateTime", s.get("date", ""))[:19],
+                e.get("dateTime", e.get("date", ""))[:19], b.get("location", "") or "")
+
+    bestaand = {}
+    for ev in google:
+        sleutel = (ev.get("extendedProperties", {}).get("private", {}) or {}).get("birdy_sync_key", "")
+        if sleutel:
+            bestaand.setdefault(sleutel, ev)
+    aanmaken, bijwerken, verwijderen = [], [], []
+    for sleutel, it in ics.items():
+        body = body_voor(sleutel, it)
+        if sleutel not in bestaand:
+            aanmaken.append(body)
+        elif kern(bestaand[sleutel]) != kern(body):
+            bijwerken.append((bestaand[sleutel]["id"], body))
+    for sleutel, ev in bestaand.items():
+        if sleutel not in ics:
+            verwijderen.append(ev["id"])
+    # dubbele Google-events met dezelfde sleutel (mag niet voorkomen) → extra's weg
+    gezien: set[str] = set()
+    for ev in google:
+        sleutel = (ev.get("extendedProperties", {}).get("private", {}) or {}).get("birdy_sync_key", "")
+        if sleutel in gezien:
+            verwijderen.append(ev["id"])
+        elif sleutel:
+            gezien.add(sleutel)
+    return aanmaken, bijwerken, verwijderen
+
+
+def sync_ics(label: str, url: str) -> dict:
+    """Eén feed synchroniseren naar de Google-gezinsagenda. Geeft tellingen terug."""
+    svc = _service()
+    cal = _cal_id()
+    nu = datetime.now()
+    van, tot = nu - timedelta(days=SYNC_VENSTER_TERUG), nu + timedelta(days=SYNC_VENSTER_VOORUIT)
+    ics = _ics_items(url, van, tot)
+    google: list[dict] = []
+    token = None
+    while True:
+        resp = svc.events().list(
+            calendarId=cal, privateExtendedProperty=f"{SYNC_PROP}={label}",
+            timeMin=van.astimezone().isoformat(), timeMax=tot.astimezone().isoformat(),
+            singleEvents=True, maxResults=250, pageToken=token, timeZone=TZ,
+            showDeleted=False,
+        ).execute()
+        google.extend(resp.get("items", []))
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    aanmaken, bijwerken, verwijderen = _sync_plan(label, ics, google)
+    for body in aanmaken:
+        svc.events().insert(calendarId=cal, body=body).execute()
+    for event_id, body in bijwerken:
+        svc.events().patch(calendarId=cal, eventId=event_id, body=body).execute()
+    for event_id in verwijderen:
+        svc.events().delete(calendarId=cal, eventId=event_id).execute()
+    return {"label": label, "in_feed": len(ics), "aangemaakt": len(aanmaken),
+            "bijgewerkt": len(bijwerken), "verwijderd": len(verwijderen)}
+
+
+def sync_all() -> list[dict]:
+    """Alle AGENDA_SYNC_ICS-feeds synchroniseren; fouten per feed worden teruggegeven."""
+    out = []
+    for label, url in sync_feeds():
+        try:
+            out.append(sync_ics(label, url))
+        except Exception as e:  # noqa: BLE001 - één kapotte feed mag de rest niet stoppen
+            out.append({"label": label, "fout": f"{type(e).__name__}: {e}"})
+    return out
+
+
+def cmd_sync() -> None:
+    if not sync_feeds():
+        sys.exit("AGENDA_SYNC_ICS is leeg — niets te synchroniseren.")
+    for r in sync_all():
+        if "fout" in r:
+            print(f"[let op] {r['label']}: {r['fout']}")
+        else:
+            print(f"{r['label']}: {r['in_feed']} in feed · {r['aangemaakt']} aangemaakt · "
+                  f"{r['bijgewerkt']} bijgewerkt · {r['verwijderd']} verwijderd")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("sync-ics", help="iCal-feeds uit AGENDA_SYNC_ICS in de Google-agenda zetten")
     pl = sub.add_parser("list")
     pl.add_argument("--days", type=int, default=7)
     pa = sub.add_parser("add")
@@ -205,6 +358,8 @@ def main() -> None:
     args = p.parse_args()
     if args.cmd == "list":
         cmd_list(args.days)
+    elif args.cmd == "sync-ics":
+        cmd_sync()
     else:
         cmd_add(args.title, args.start, args.dag, args.duur, args.jaarlijks)
 

@@ -95,6 +95,9 @@ Werkt zoals voorheen: bot via @BotFather (`/setprivacy` → Disable), token in
   Birdy op verzoek ("zoek eens uit …"); het dagelijkse eigen-initiatief-moment staat uit
   (AGENT_PROACTIVE_TIME leeg; vul een tijd in om het aan te zetten).
 - "die is klaar" / "verzet dat naar vrijdag" — gewoon zeggen, Birdy werkt het bij.
+- Sportprogramma's (iCal-link van Nevobo, KNVB, …) in `AGENDA_SYNC_ICS` zet Birdy elke
+  paar uur ín de Google-gezinsagenda en houdt ze actueel (verschoven of afgelast = mee).
+  `AGENDA_ICS_FEEDS` toont een feed alleen-lezen náást de agenda (zoals FamilyWall).
 
 ## Veiligheid & principes
 

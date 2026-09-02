@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .brain import Brain, ensure_git
 from .config import Config
@@ -78,6 +78,23 @@ async def check_drive_inbox(brain: Brain, adapters: list) -> None:
     await broadcast(adapters, reply, kind="chat")
 
 
+async def sync_ics_feeds() -> None:
+    """iCal-feeds (bijv. Nevobo-programma) in de Google-gezinsagenda zetten. Geen LLM."""
+    from . import gcal
+
+    if not gcal.sync_feeds():
+        return
+    try:
+        for r in await asyncio.to_thread(gcal.sync_all):
+            if "fout" in r:
+                log.warning("agenda-sync %s mislukt: %s", r["label"], r["fout"])
+            elif r["aangemaakt"] or r["bijgewerkt"] or r["verwijderd"]:
+                log.info("agenda-sync %s: +%d ~%d -%d (feed: %d)", r["label"], r["aangemaakt"],
+                         r["bijgewerkt"], r["verwijderd"], r["in_feed"])
+    except Exception:
+        log.exception("agenda-sync mislukt")
+
+
 async def scheduler(brain: Brain, adapters: list) -> None:
     fired: dict[str, str] = {}
     jobs = [
@@ -88,8 +105,12 @@ async def scheduler(brain: Brain, adapters: list) -> None:
     ]
     stil = {"proactive", "aandacht"}  # geen chatbericht, geen foutmelding bij uitval
     last_inbox_check = datetime.min
+    last_ics_sync = datetime.now() - timedelta(hours=cfg.ics_sync_hours) + timedelta(minutes=2)  # eerste keer 2 min na start
     while True:
         now = datetime.now()
+        if cfg.ics_sync_hours > 0 and (now - last_ics_sync) >= timedelta(hours=cfg.ics_sync_hours):
+            last_ics_sync = now
+            await sync_ics_feeds()
         for name, spec, prompt, label in jobs:
             key = _due(spec, now, fired.get(name))
             if key:
