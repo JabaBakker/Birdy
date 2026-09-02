@@ -9,10 +9,13 @@ Aan/uit via DASHBOARD_TOKEN in .env: leeg = dashboard uit.
                           Birdy's briefingpunten uit AANDACHT.md), lijstjes, verjaardagen,
                           regelzaken, thuis (JSON, cache 2 min)
 - POST /api/message     → {"text": ...} → zelfde brein als de chat; antwoord terug + echo in Slack
+- GET/POST /api/plan    → gedeelde kinderplanning (workspace/memory/planning.json), zodat de
+                          timer op tablet én telefoon dezelfde is
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import date, datetime, timedelta
@@ -24,7 +27,10 @@ from . import agenda, bronnen, signalen, todoist
 from .brain import Brain
 from .config import Config
 
-STATIC_DIR = Path(__file__).parent / "static"  # dashboard.html/.css/.js + logo's
+STATIC_DIR = Path(__file__).parent / "static"  # dashboard.html/.css/.js + logo's + pwa
+STATIC_BESTANDEN = ("dashboard.css", "dashboard.js", "manifest.webmanifest", "sw.js",
+                    "icon-192.png", "icon-512.png")
+PLAN_MAX_BYTES = 60_000  # gedeelde kinderplanning (planning.json) blijft klein
 
 
 def _static_versie() -> str:
@@ -71,8 +77,10 @@ class Dashboard:
     async def start(self) -> None:
         app = web.Application()
         app.router.add_get("/", self.page)
-        app.router.add_get("/dashboard.css", self.static)
-        app.router.add_get("/dashboard.js", self.static)
+        for naam in STATIC_BESTANDEN:
+            app.router.add_get(f"/{naam}", self.static)
+        app.router.add_get("/api/plan", self.plan_get)
+        app.router.add_post("/api/plan", self.plan_post)
         app.router.add_get("/api/overview", self.overview)
         app.router.add_get("/api/agenda", self.agenda)
         app.router.add_post("/api/message", self.message)
@@ -114,9 +122,11 @@ class Dashboard:
 
     async def static(self, request: web.Request) -> web.Response:
         naam = request.path.lstrip("/")
-        if naam not in ("dashboard.css", "dashboard.js"):
+        if naam not in STATIC_BESTANDEN:
             raise web.HTTPNotFound()
-        return web.FileResponse(STATIC_DIR / naam, headers={"Cache-Control": "public, max-age=31536000"})
+        # css/js hebben een ?v=hash en mogen lang gecachet worden; manifest/sw/icons niet
+        cache = "public, max-age=31536000" if naam.startswith("dashboard.") else "no-cache"
+        return web.FileResponse(STATIC_DIR / naam, headers={"Cache-Control": cache})
 
     async def logo(self, request: web.Request) -> web.Response:
         naam = "logo-bird.png" if request.path.endswith("logo-bird.png") else "logo.png"
@@ -125,6 +135,59 @@ class Dashboard:
             raise web.HTTPNotFound()  # de pagina valt dan terug op het vogel-emoji
         return web.Response(body=pad.read_bytes(), content_type="image/png",
                             headers={"Cache-Control": "max-age=86400"})
+
+    # -- gedeelde kinderplanning (zelfde timer op tablet én telefoon) -------
+
+    def _plan_pad(self) -> Path:
+        return self.cfg.workspace / "memory" / "planning.json"
+
+    def _plan_lees(self) -> dict:
+        try:
+            data = json.loads(self._plan_pad().read_text())
+            if isinstance(data, dict):
+                return {"plan": data.get("plan"), "taken": data.get("taken") or {},
+                        "bijgewerkt": int(data.get("bijgewerkt") or 0)}
+        except (OSError, ValueError):
+            pass
+        return {"plan": None, "taken": {}, "bijgewerkt": 0}
+
+    async def plan_get(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        return web.json_response(self._plan_lees(), headers={"Cache-Control": "no-store"})
+
+    async def plan_post(self, request: web.Request) -> web.Response:
+        """{plan?: {...}, taken?: {...}} → samenvoegen met wat er staat; laatste schrijver wint."""
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            assert isinstance(body, dict)
+        except Exception:
+            return web.json_response({"error": "geen geldige json"}, status=400)
+        huidig = self._plan_lees()
+        if "plan" in body:
+            if body["plan"] is not None and not isinstance(body["plan"], dict):
+                return web.json_response({"error": "plan moet een object zijn"}, status=400)
+            huidig["plan"] = body["plan"]
+        if "taken" in body:
+            if not isinstance(body["taken"], dict):
+                return web.json_response({"error": "taken moet een object zijn"}, status=400)
+            huidig["taken"] = body["taken"]
+        huidig["bijgewerkt"] = int(time.time() * 1000)
+        tekst = json.dumps(huidig, ensure_ascii=False)
+        if len(tekst.encode()) > PLAN_MAX_BYTES:
+            return web.json_response({"error": "planning te groot"}, status=413)
+        pad = self._plan_pad()
+        try:
+            pad.parent.mkdir(parents=True, exist_ok=True)
+            tmp = pad.with_suffix(".tmp")
+            tmp.write_text(tekst)
+            tmp.replace(pad)
+        except OSError:
+            log.warning("planning opslaan mislukt", exc_info=True)
+            return web.json_response({"error": "opslaan mislukt"}, status=500)
+        return web.json_response({"ok": True, "bijgewerkt": huidig["bijgewerkt"]})
 
     async def overview(self, request: web.Request) -> web.Response:
         if not self._authorized(request):

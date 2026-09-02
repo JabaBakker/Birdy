@@ -55,11 +55,14 @@ class Config:
     dashboard_port: int = field(default_factory=lambda: _env_int("DASHBOARD_PORT", 8811))
     # Namen voor de kleurcodering in de weekweergave (komma-gescheiden)
     dashboard_personen: list[str] = field(default_factory=lambda: [
-        x.strip() for x in os.environ.get("DASHBOARD_PERSONEN", "Jaap,Yvette,Evi,Chloë").split(",")
+        x.strip() for x in os.environ.get("DASHBOARD_PERSONEN", "").split(",")
         if x.strip()
     ])
 
-    agent_name: str = field(default_factory=lambda: os.environ.get("AGENT_NAME", "Fien"))
+    agent_name: str = field(default_factory=lambda: os.environ.get("AGENT_NAME", "Birdy"))
+    # voor de prompts: wie zijn de ouders ("Jaap en Yvette") en wie is de vangnet-eigenaar
+    ouders: str = field(default_factory=lambda: os.environ.get("AGENT_OUDERS", "de ouders"))
+    vangnet: str = field(default_factory=lambda: os.environ.get("AGENT_VANGNET", "de ouder die het bericht stuurde"))
 
     # Vaste momenten (lokale tijd, HH:MM). Leeg = uit.
     digest_time: str = field(default_factory=lambda: os.environ.get("AGENT_DIGEST_TIME", "07:15"))

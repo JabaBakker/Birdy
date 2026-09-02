@@ -54,6 +54,7 @@ class Brain:
         fmt.setdefault("now", datetime.now().strftime("%A %d-%m-%Y %H:%M"))
         user_prompt = self._prompt(prompt_name, **fmt)
         system_prompt = (self.cfg.prompts_dir / "system.md").read_text().replace(
+            "{ouders}", self.cfg.ouders).replace("{vangnet}", self.cfg.vangnet).replace(
             "{agent_name}", self.cfg.agent_name
         )
 

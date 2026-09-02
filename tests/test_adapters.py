@@ -213,6 +213,26 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                 async with s.post("http://127.0.0.1:18811/api/event", json={"actie": "verwijder"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 400)  # verwijderen zonder id
+                async with s.get("http://127.0.0.1:18811/api/plan", headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 200)
+                    self.assertEqual((await r.json())["bijgewerkt"], 0)  # nog niets gedeeld
+                async with s.post("http://127.0.0.1:18811/api/plan", json={"plan": "tekst"},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 400)
+                async with s.post("http://127.0.0.1:18811/api/plan",
+                                  json={"plan": {"datum": "2026-09-02", "gekozen": [0], "start": 1}, "taken": {"ochtend": []}},
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 200)
+                    ts = (await r.json())["bijgewerkt"]
+                async with s.get("http://127.0.0.1:18811/api/plan", headers={"X-Dashboard-Key": "geheim"}) as r:
+                    pj = await r.json()
+                    self.assertEqual(pj["plan"]["gekozen"], [0]); self.assertEqual(pj["bijgewerkt"], ts)
+                async with s.get("http://127.0.0.1:18811/manifest.webmanifest") as r:
+                    self.assertEqual(r.status, 200)
+                async with s.get("http://127.0.0.1:18811/sw.js") as r:
+                    self.assertEqual(r.status, 200)
+                async with s.get("http://127.0.0.1:18811/geheim.txt") as r:
+                    self.assertEqual(r.status, 404)
                 async with s.post("http://127.0.0.1:18811/api/message",
                                   json={"text": "voeg kwark toe"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:

@@ -841,27 +841,57 @@ function plLeeg(dagdeel){
   return { datum: plVandaag(), dagdeel, versie, gekozen: [], start: 0, af: [],
            vertrek: dagdeel === 'ochtend' ? '08:00' : '19:30' };
 }
+function plGeldig(s){ return s && s.datum === plVandaag() && Array.isArray(s.gekozen); }
 function plLaad(){
+  // eerste vulling uit de browseropslag (offline-terugval); de server is leidend (plSync)
   let s = null;
   try { s = JSON.parse(localStorage.getItem('birdy-plan')); } catch(e){}
-  if (!s || s.datum !== plVandaag() || !Array.isArray(s.gekozen))
-    s = plLeeg(new Date().getHours() < 14 ? 'ochtend' : 'avond');
+  if (!plGeldig(s)) s = plLeeg(new Date().getHours() < 14 ? 'ochtend' : 'avond');
   return s;
 }
 let PLAN = plLaad();
+// ── gedeelde planning: één status op de server, zodat tablet en telefoon dezelfde timer zien ──
+let PLTAKEN = {};            // eigen taaklijsten per dagdeel (gedeeld)
+try { PLTAKEN = JSON.parse(localStorage.getItem('birdy-plan-taken')) || {}; } catch(e){}
+let plServerTs = 0, plPushTimer = null, plPushBezig = false, plPushWacht = null;
+function plSyncPush(deel){
+  plPushWacht = Object.assign(plPushWacht || {}, deel);
+  clearTimeout(plPushTimer);
+  plPushTimer = setTimeout(async () => {
+    const body = plPushWacht; plPushWacht = null; plPushBezig = true;
+    try {
+      const r = await fetch('/api/plan', { method:'POST',
+        headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (r.ok && d.bijgewerkt) plServerTs = d.bijgewerkt;
+    } catch(e){ /* offline: lokale kopie blijft, volgende wijziging probeert opnieuw */ }
+    plPushBezig = false;
+  }, 250);
+}
+async function plSync(){
+  if (!KEY || plPushBezig || plPushWacht) return;
+  try {
+    const r = await fetch('/api/plan', { headers: { 'X-Dashboard-Key': KEY } });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.bijgewerkt || d.bijgewerkt <= plServerTs) return;
+    plServerTs = d.bijgewerkt;
+    if (d.taken && typeof d.taken === 'object') PLTAKEN = d.taken;
+    if (plGeldig(d.plan)) PLAN = d.plan;
+    try { localStorage.setItem('birdy-plan', JSON.stringify(PLAN)); localStorage.setItem('birdy-plan-taken', JSON.stringify(PLTAKEN)); } catch(e){}
+    if (document.getElementById('paneelPlan').style.display !== 'none') renderPlan();
+  } catch(e){ /* volgende poging */ }
+}
+plSync(); setInterval(plSync, 3000);
 const EMOJIS = ['🚽','👕','🥣','🪥','🧺','🎒','🧸','🛁','🩳','📖','🧦','🍎','🐕','🎨','✏️','🚲'];
 function takenVan(d){
-  try {
-    const alles = JSON.parse(localStorage.getItem('birdy-plan-taken')) || {};
-    if (Array.isArray(alles[d]) && alles[d].length) return alles[d];
-  } catch(e){}
+  if (Array.isArray(PLTAKEN[d]) && PLTAKEN[d].length) return PLTAKEN[d];
   return ROUTINES[d];
 }
 function takenBewaar(d, lijst){
-  let alles = {};
-  try { alles = JSON.parse(localStorage.getItem('birdy-plan-taken')) || {}; } catch(e){}
-  alles[d] = lijst;
-  try { localStorage.setItem('birdy-plan-taken', JSON.stringify(alles)); } catch(e){}
+  PLTAKEN[d] = lijst;
+  try { localStorage.setItem('birdy-plan-taken', JSON.stringify(PLTAKEN)); } catch(e){}
+  plSyncPush({ taken: PLTAKEN });
 }
 function taakTijd(i, delta){
   const lijst = takenVan(PLAN.dagdeel).map(t => ({ ...t }));
@@ -875,10 +905,9 @@ function taakWeg(i){
   takenBewaar(PLAN.dagdeel, lijst); plBewaar(); renderPlan();
 }
 function takenHerstel(){
-  let alles = {};
-  try { alles = JSON.parse(localStorage.getItem('birdy-plan-taken')) || {}; } catch(e){}
-  delete alles[PLAN.dagdeel];
-  try { localStorage.setItem('birdy-plan-taken', JSON.stringify(alles)); } catch(e){}
+  delete PLTAKEN[PLAN.dagdeel];
+  try { localStorage.setItem('birdy-plan-taken', JSON.stringify(PLTAKEN)); } catch(e){}
+  plSyncPush({ taken: PLTAKEN });
   PLAN.gekozen = []; plBewaar(); renderPlan();
 }
 let plNieuwEmoji = EMOJIS[0], plNieuwMin = 5;
@@ -906,7 +935,10 @@ function plNieuwToevoegen(){
   renderPlan();
 }
 let plWaarsch = null, plWaarschVertrek = false;
-function plBewaar(){ try { localStorage.setItem('birdy-plan', JSON.stringify(PLAN)); } catch(e){} }
+function plBewaar(){
+  try { localStorage.setItem('birdy-plan', JSON.stringify(PLAN)); } catch(e){}
+  plSyncPush({ plan: PLAN });
+}
 function plDagdeel(d){ PLAN = plLeeg(d); PLAN.dagdeel = d;
   PLAN.vertrek = d === 'ochtend' ? '08:00' : '19:30'; plBewaar(); renderPlan(); }
 function plVersie(v){ PLAN.versie = v;
@@ -1423,3 +1455,8 @@ document.getElementById('chatveld').addEventListener('keydown',
   e => { if (e.key === 'Enter' || e.keyCode === 13) stuur(e.target.value); });
 document.getElementById('tvVeld').addEventListener('keydown',
   e => { if (e.key === 'Enter' || e.keyCode === 13) tvStuur(e.target.value); });
+
+// ── PWA: installeerbaar op het beginscherm van telefoon/tablet ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+}

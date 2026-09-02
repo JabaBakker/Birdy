@@ -58,7 +58,7 @@ def bereik(van: datetime, tot: datetime, zoek: str = "") -> tuple[list[dict], bo
                     "titel": ev.get("summary", "(zonder titel)"),
                     "omschrijving": (ev.get("description") or "")[:600],
                     "locatie": ev.get("location", ""),
-                    "wie": naam.replace("bakkerbirdy@gmail.com", "Birdy"),
+                    "wie": "Birdy" if naam and naam == os.environ.get("AGENT_GOOGLE_ACCOUNT", "") else naam,
                     "bron": bron,
                 })
             google_ok = True
