@@ -1172,10 +1172,22 @@ function filterItems(items, tekstVan){
   });
 }
 function kw(w){ return (Math.round((w || 0) / 100) / 10).toFixed(1).replace('.', ',') + ' kW'; }
+// P1-meter (net_w): + = afnemen van het net, − = terugleveren. Huisverbruik = zon + net.
+function energie(th){
+  const zon = th.zon_w, net = th.net_w;
+  return {
+    zon,
+    huis: (zon !== null && net !== null) ? Math.max(0, zon + net) : (zon === null ? net : null),
+    terug: net !== null && net < 0 ? -net : 0,
+    vanNet: net !== null && net > 0 ? net : 0,
+  };
+}
 function nettoLabel(th){
-  if (th.zon_w === null || th.net_w === null) return '';
-  const netto = th.zon_w - th.net_w;
-  return `<small class="${netto >= 0 ? 'nu' : ''}">${netto >= 0 ? '↑' : '↓'} ${kw(Math.abs(netto))}</small>`;
+  if (th.net_w === null) return '';
+  const e = energie(th);
+  return e.terug > 0
+    ? `<small class="nu">↑ ${kw(e.terug)}</small>`
+    : `<small>↓ ${kw(e.vanNet)}</small>`;
 }
 async function lampUit(id){
   try {
@@ -1267,11 +1279,13 @@ function renderL2(){
     const th = DATA.thuis;
     if (!th){ document.getElementById('l2Inhoud').innerHTML = '<p class="leeg">Homey is even niet bereikbaar.</p>'; return; }
     html += '<h4>⚡ Energie</h4><ul>';
-    if (th.zon_w !== null) html += `<li><span>☀️ Zonnepanelen</span><small class="waarde">${kw(th.zon_w)}</small></li>`;
-    if (th.net_w !== null) html += `<li><span>🏠 Verbruik (slimme meter)</span><small class="waarde">${kw(th.net_w)}</small></li>`;
-    if (th.zon_w !== null && th.net_w !== null){
-      const netto = th.zon_w - th.net_w;
-      html += `<li><span>${netto >= 0 ? '↑ Teruglevering' : '↓ Van het net'}</span><small class="waarde">${kw(Math.abs(netto))}</small></li>`;
+    const e = energie(th);
+    if (e.zon !== null) html += `<li><span>☀️ Zonnepanelen leveren</span><small class="waarde">${kw(e.zon)}</small></li>`;
+    if (e.huis !== null) html += `<li><span>🏠 Huis verbruikt</span><small class="waarde">${kw(e.huis)}</small></li>`;
+    if (th.net_w !== null){
+      html += e.terug > 0
+        ? `<li><span>↑ Teruglevering aan het net</span><small class="waarde">${kw(e.terug)}</small></li>`
+        : `<li><span>↓ Afname van het net</span><small class="waarde">${kw(e.vanNet)}</small></li>`;
     }
     html += '</ul>';
     if ((th.klimaat || []).length){
@@ -1592,8 +1606,9 @@ async function ververs(){
     if (th){
       const rijen = [];
       if (th.zon_w !== null || th.net_w !== null){
-        let r = (th.zon_w !== null ? `☀️ ${kw(th.zon_w)}` : '') +
-                (th.net_w !== null ? ` · ⚡ ${kw(th.net_w)}` : '');
+        const e = energie(th);
+        let r = [e.zon !== null ? `☀️ ${kw(e.zon)}` : '', e.huis !== null ? `🏠 ${kw(e.huis)}` : '']
+                  .filter(Boolean).join(' · ');
         rijen.push(`<li><span>${r}</span>${nettoLabel(th)}</li>`);
       }
       const woon = (th.klimaat || []).find(k => /woon/i.test(k.kamer)) || (th.klimaat || [])[0];

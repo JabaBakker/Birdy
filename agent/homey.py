@@ -56,7 +56,8 @@ def samenvatting() -> dict:
             out["zon_w"] = _cap(d, "measure_power")
         elif (cls == "sensor" and out["net_w"] is None
               and _cap(d, "measure_power") is not None and _cap(d, "meter_power") is not None):
-            out["net_w"] = _cap(d, "measure_power")  # slimme meter (P1)
+            # slimme meter (P1): uitwisseling met het net, + = afnemen, − = terugleveren
+            out["net_w"] = _cap(d, "measure_power")
         elif "tesla" in naam.lower() or (cls == "other" and _cap(d, "measure_battery") is not None
                                           and _cap(d, "measure_power") is not None):
             out["auto"] = {"naam": naam, "batterij": _cap(d, "measure_battery"),
