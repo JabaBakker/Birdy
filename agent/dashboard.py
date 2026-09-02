@@ -5,7 +5,9 @@ ontsluiting gebeurt via Tailscale (tailscale serve → HTTPS, nodig voor de micr
 Aan/uit via DASHBOARD_TOKEN in .env: leeg = dashboard uit.
 
 - GET  /                → kioskpagina (dark, auto-verversend, microfoonknop)
-- GET  /api/overview    → agenda, overzicht, lijstjes, verjaardagen (JSON, cache 2 min)
+- GET  /api/overview    → agenda, onderwerpen (Doc "Wat loopt er"), aandacht (regels +
+                          Birdy's briefingpunten uit AANDACHT.md), lijstjes, verjaardagen,
+                          regelzaken, thuis (JSON, cache 2 min)
 - POST /api/message     → {"text": ...} → zelfde brein als de chat; antwoord terug + echo in Slack
 """
 from __future__ import annotations
@@ -118,47 +120,167 @@ def _agenda_compact(rijk: list[dict]) -> list[dict]:
     } for ev in rijk][:22]
 
 
-_OVERZICHT_KOPPEN = (("🔴", "Nu / te laat"), ("🟠", "Deze week"), ("🟡", "Later"),
-                     ("⏳", "Wachten op"))
+def _datum_dagen(tekst: str, vandaag: date | None = None) -> int | None:
+    """DD-MM(-JJJJ) ergens in de tekst → aantal dagen vanaf vandaag (negatief = voorbij).
+    Zonder jaar: de eerstvolgende keer dat die datum valt (of net voorbij, tot 60 dagen)."""
+    import re
+
+    vandaag = vandaag or date.today()
+    m = re.search(r"(\d{1,2})-(\d{1,2})(?:-(\d{4}))?", tekst)
+    if not m:
+        return None
+    dag, maand, jaar = int(m.group(1)), int(m.group(2)), m.group(3)
+    try:
+        if jaar:
+            return (date(int(jaar), maand, dag) - vandaag).days
+        d = date(vandaag.year, maand, dag)
+        if (d - vandaag).days < -60:
+            d = date(vandaag.year + 1, maand, dag)
+        return (d - vandaag).days
+    except ValueError:
+        return None
 
 
-def _overzicht_parse(text: str) -> dict[str, list[str]]:
-    secties: dict[str, list[str]] = {k: [] for k, _ in _OVERZICHT_KOPPEN}
-    huidig = None
+def _onderwerpen_parse(text: str, vandaag: date | None = None) -> list[dict]:
+    """Lopende onderwerpen uit het Google Doc 'Wat loopt er'. Regelformat:
+    • Kinderfeest Evi — wie: Jaap · wanneer: 06-09 · stap: gastenlijst invullen · notitie: …
+    Regels onder een kop 'Afgerond' of beginnend met ✅ tellen niet mee."""
+    import re
+
+    def veld(s: str, naam: str) -> str:
+        m = re.search(r"\b" + naam + r"\s*:\s*([^·]+)", s, re.I)
+        return m.group(1).strip() if m else ""
+
+    out, klaar = [], False
     for line in text.splitlines():
         s = line.strip()
         if not s:
             continue
-        kop = next((k for k in secties if s.startswith(k)), None)
-        if kop:
-            huidig = kop
+        if re.match(r"^(#+\s*)?(afgerond|klaar|gedaan)\b", s, re.I):
+            klaar = True
             continue
-        if s[0] in "🔴🟠🟡⏳✅📋":  # andere kop (bijv. ✅) → sectie sluiten
-            huidig = None
+        if not s.startswith(("•", "-", "*", "✅")):
             continue
-        if huidig and s.startswith(("•", "-", "*")):
-            item = s.lstrip("•-* ").strip()
-            if item.startswith("(") or item.lower().startswith("niets"):
-                continue  # plaatshouders als "(niets — goed nieuws …)" niet tonen
-            secties[huidig].append(item)
-    return secties
+        if klaar or s.startswith("✅") or "✅" in s[:3]:
+            continue
+        s = s.lstrip("•-* ").strip()
+        naam = re.split(r"\s+[—–-]\s+|\s+·\s+", s)[0].strip()
+        if not naam:
+            continue
+        wanneer = veld(s, "wanneer")
+        out.append({
+            "naam": naam[:80], "wie": veld(s, "wie")[:30], "wanneer": wanneer[:30],
+            "dagen": _datum_dagen(wanneer, vandaag) if wanneer else None,
+            "stap": veld(s, "(?:volgende )?stap")[:160], "notitie": veld(s, "notitie")[:300],
+        })
+    out.sort(key=lambda o: (o["dagen"] is None, o["dagen"] if o["dagen"] is not None else 0))
+    return out[:30]
 
 
-def _overzicht_kort(text: str) -> dict:
-    """Samenvatting voor de Vandaag-tab: urgent + deze week + rest-telling."""
-    s = _overzicht_parse(text)
-    rest = []
-    if s["🟡"]:
-        rest.append(f"{len(s['🟡'])} voor later")
-    if s["⏳"]:
-        rest.append(f"{len(s['⏳'])} wachten op")
-    return {"urgent": s["🔴"][:5], "week": s["🟠"][:5], "rest": " · ".join(rest)}
+def _doc_tekst(pad: str) -> str:
+    """Platte tekst van een Google Doc in de Drive-hub; '' als hij er niet is of Drive uit staat."""
+    from . import gdrive
+
+    try:
+        svc = gdrive._service()
+        node = gdrive._resolve(svc, pad, must_exist=False)
+        if not node:
+            return ""
+        text = svc.files().export(fileId=node["id"], mimeType="text/plain").execute()
+        return text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
+    except BaseException:
+        return ""
 
 
-def _overzicht_secties(text: str) -> list[dict]:
-    """Volledige lijst per sectie, voor de verdiepende pagina."""
-    s = _overzicht_parse(text)
-    return [{"kop": f"{k} {naam}", "items": s[k]} for k, naam in _OVERZICHT_KOPPEN if s[k]]
+ONDERWERPEN_DOC = "Wat loopt er"
+
+
+def _onderwerpen() -> list[dict]:
+    return _onderwerpen_parse(_doc_tekst(ONDERWERPEN_DOC))
+
+
+def _aandacht_birdy(workspace: Path) -> dict:
+    """Birdy's aandachtspunten uit AANDACHT.md (geschreven door de ochtendbriefing).
+    Format: eerste regel '💡 AANDACHT (bijgewerkt DD-MM HH:MM)', daarna • regels (max 3)."""
+    import re
+
+    pad = workspace / "AANDACHT.md"
+    if not pad.exists():
+        return {"tijd": "", "items": []}
+    items, tijd = [], ""
+    for line in pad.read_text().splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        m = re.search(r"bijgewerkt\s+([\d-]+\s+[\d:]+)", s, re.I)
+        if m and not tijd:
+            tijd = m.group(1)
+            continue
+        if s.startswith(("•", "-", "*")):
+            items.append(s.lstrip("•-* ").strip()[:200])
+    return {"tijd": tijd, "items": items[:3]}
+
+
+def _signalen(acties: list[dict], regelzaken: list[dict], verjaardagen: list[dict],
+              week: list[dict], onderwerpen: list[dict], vandaag: date | None = None) -> list[dict]:
+    """Regel-gebaseerde aandachtspunten, zonder LLM. Elk item: {tekst, l2, ernst}
+    (ernst 0 = te laat/vandaag, 1 = binnenkort). l2 = welk blad opent bij klikken."""
+    vandaag = vandaag or date.today()
+    out: list[dict] = []
+    vandaag_s = vandaag.isoformat()
+
+    te_laat = [a for a in acties if a.get("due") and a["due"] < vandaag_s]
+    if te_laat:
+        n = len(te_laat)
+        out.append({"tekst": f"{n} actie{'s' if n > 1 else ''} over de datum: "
+                             + ", ".join(a["tekst"][:28] for a in te_laat[:2])
+                             + (" …" if n > 2 else ""), "l2": "acties", "ernst": 0})
+    vandaag_acties = [a for a in acties if a.get("due") == vandaag_s]
+    if vandaag_acties:
+        n = len(vandaag_acties)
+        out.append({"tekst": f"Vandaag: {', '.join(a['tekst'][:28] for a in vandaag_acties[:3])}"
+                             + (f" (+{n - 3})" if n > 3 else ""), "l2": "acties", "ernst": 0})
+
+    for o in onderwerpen:
+        if o["dagen"] is not None and o["dagen"] <= 1:
+            wanneer = "vandaag" if o["dagen"] == 0 else "morgen" if o["dagen"] == 1 \
+                else f"{-o['dagen']} dag{'en' if o['dagen'] < -1 else ''} over tijd"
+            out.append({"tekst": f"📂 {o['naam']}: {wanneer}"
+                                 + (f" — {o['stap']}" if o["stap"] else ""),
+                        "l2": "onderwerpen", "ernst": 0 if o["dagen"] <= 0 else 1})
+
+    for z in regelzaken:
+        if z.get("dagen") is not None and z["dagen"] < 0:
+            out.append({"tekst": f"🔁 {z['naam']} is {-z['dagen']} dag{'en' if z['dagen'] < -1 else ''} over tijd"
+                                 + (f" ({z['wie']})" if z.get("wie") else ""),
+                        "l2": "regelzaken", "ernst": 0})
+
+    for j in verjaardagen:
+        if j.get("dagen") is not None and 0 <= j["dagen"] <= 7 and not (j.get("notitie") or "").strip():
+            wanneer = "vandaag" if j["dagen"] == 0 else "morgen" if j["dagen"] == 1 else f"over {j['dagen']} dagen"
+            out.append({"tekst": f"🎂 {j['naam']} {wanneer}, nog geen cadeau-idee",
+                        "l2": "verjaardagen", "ernst": 1 if j["dagen"] > 1 else 0})
+
+    # overlappende afspraken met tijd, vandaag en morgen
+    morgen_s = (vandaag + timedelta(days=1)).isoformat()
+    getimed = [e for e in week if "T" in e.get("start", "") and e["start"][:10] in (vandaag_s, morgen_s)]
+    gemeld: set[tuple[str, str]] = set()
+    for i, a in enumerate(getimed):
+        for b in getimed[i + 1:]:
+            if a["start"][:10] != b["start"][:10]:
+                continue
+            a_eind, b_eind = a.get("eind") or a["start"], b.get("eind") or b["start"]
+            if a["start"] < b_eind and b["start"] < a_eind:
+                sleutel = tuple(sorted((a["titel"], b["titel"])))
+                if sleutel in gemeld:
+                    continue
+                gemeld.add(sleutel)
+                dag = "vandaag" if a["start"][:10] == vandaag_s else "morgen"
+                out.append({"tekst": f"⚠️ Overlap {dag} {a['start'][11:16]}: {a['titel'][:24]} en {b['titel'][:24]}",
+                            "l2": "week", "ernst": 0})
+
+    out.sort(key=lambda s: s["ernst"])
+    return out[:8]
 
 
 def _todoist_lijst(naam: str) -> list[dict]:
@@ -432,15 +554,16 @@ class Dashboard:
     async def _bouw(self) -> dict:
         gen = self._gen
         if not self._traag or time.time() - self._traag_ts > CACHE_TTL:
-            (week, compleet), jarigen, regelzaken, thuis = await asyncio.gather(
+            (week, compleet), jarigen, regelzaken, thuis, onderwerpen = await asyncio.gather(
                 asyncio.to_thread(_agenda_rijk),
                 asyncio.to_thread(_verjaardagen),
                 asyncio.to_thread(_regelzaken),
                 asyncio.to_thread(_thuis),
+                asyncio.to_thread(_onderwerpen),
             )
             if compleet or not self._traag:
-                self._traag = {"week": week, "verjaardagen": jarigen,
-                               "regelzaken": regelzaken, "thuis": thuis}
+                self._traag = {"week": week, "verjaardagen": jarigen, "regelzaken": regelzaken,
+                               "thuis": thuis, "onderwerpen": onderwerpen}
                 self._traag_ts = time.time()
             else:
                 # een bron faalde: houd de vorige complete week vast en probeer bij de
@@ -448,20 +571,24 @@ class Dashboard:
                 self._traag["verjaardagen"] = jarigen
                 self._traag["regelzaken"] = regelzaken
                 self._traag["thuis"] = thuis or self._traag.get("thuis")
+                self._traag["onderwerpen"] = onderwerpen
         boodschappen, acties, boodschappen_af, acties_af = await asyncio.gather(
             asyncio.to_thread(_todoist_lijst, "boodschappen"),
             asyncio.to_thread(_todoist_lijst, "acties"),
             asyncio.to_thread(_todoist_afgevinkt, "boodschappen"),
             asyncio.to_thread(_todoist_afgevinkt, "acties"),
         )
-        overzicht_pad = self.cfg.workspace / "OVERZICHT.md"
-        overzicht = overzicht_pad.read_text() if overzicht_pad.exists() else ""
+        onderwerpen = self._traag.get("onderwerpen", [])
         vers = {
             "agenda": _agenda_compact(self._traag["week"]),
             "week": self._traag["week"],
             "personen": self.cfg.dashboard_personen,
-            "taken": _overzicht_kort(overzicht),
-            "overzicht_vol": _overzicht_secties(overzicht),
+            "onderwerpen": onderwerpen,
+            "aandacht": {
+                "birdy": _aandacht_birdy(self.cfg.workspace),
+                "signalen": _signalen(acties, self._traag.get("regelzaken", []),
+                                      self._traag["verjaardagen"], self._traag["week"], onderwerpen),
+            },
             "boodschappen": boodschappen,
             "acties": acties,
             "boodschappen_af": boodschappen_af,
@@ -687,6 +814,15 @@ PAGE = """<!doctype html>
   li.urgent::before { content:"● "; color:var(--rood); }
   li.week::before { content:"● "; color:var(--amber); }
   .rest { color:var(--dim); font-size:.85rem; margin-top:.45rem; }
+  /* aandacht: Birdy's eigen punten herkenbaar (vogeltje + warme tint), regels gewoon */
+  li.birdy { background:rgba(217,164,78,.11); border-left:3px solid var(--amber); border-radius:8px;
+             padding:.38rem .55rem; margin:.12rem 0; align-items:flex-start; }
+  li.birdy img.bird { width:1.15rem; height:1.15rem; flex:0 0 auto; margin-top:.1rem; }
+  li.signaal { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.28rem .4rem; }
+  li.signaal:active { background:rgba(127,191,166,.12); }
+  li.signaal.ernst0 span::before { content:"● "; color:var(--rood); }
+  li.signaal.ernst1 span::before { content:"● "; color:var(--amber); }
+  .rest .bird { width:.9rem; height:.9rem; vertical-align:-.15rem; margin-right:.2rem; }
   li.vink { cursor:pointer; border-radius:8px; margin:0 -.4rem; padding:.3rem .4rem; }
   li.vink:active { background:rgba(127,191,166,.12); }
   li.vink::before { content:"◯"; color:var(--pc, var(--accent)); font-size:.9rem; }
@@ -1028,6 +1164,8 @@ PAGE = """<!doctype html>
   </div>
   <div class="lay" id="paneelVandaag">
     <aside class="zijbalk">
+      <div class="mini" onclick="openL2('onderwerpen')">
+        <h3>📂 Onderwerpen <b id="moCount"></b></h3><ul id="moList"></ul></div>
       <div class="mini" onclick="openL2('boodschappen')">
         <h3>🛒 Boodschappen <b id="mbCount"></b></h3><ul id="mbList"></ul></div>
       <div class="mini" onclick="openL2('verjaardagen')">
@@ -1039,7 +1177,7 @@ PAGE = """<!doctype html>
     </aside>
     <div class="hoofd">
       <div class="panel"><h2 class="klik" onclick="kiesTab('week')" title="Naar weekoverzicht">📅 Agenda ↗</h2><ul id="agenda"></ul></div>
-      <div class="panel"><h2 class="klik" onclick="openL2('taken')">📋 Wat loopt er ↗</h2><ul id="taken"></ul><div class="rest" id="takenrest"></div></div>
+      <div class="panel aandacht"><h2 class="klik" onclick="openL2('aandacht')">💡 Aandacht ↗</h2><ul id="aandacht"></ul><div class="rest" id="aandachtrest"></div></div>
       <div class="panel"><h2 class="klik" onclick="openL2('acties')">⚡ Acties ↗</h2><ul id="acties"></ul>
         <div class="toevoeg"><input placeholder="+ toevoegen…" enterkeyhint="done"
           onkeydown="voegToe(event,'acties',this)"></div>
@@ -1199,6 +1337,10 @@ async function lampUit(id){
     toon('💡 Uit gezet'); ververs();
   } catch(e){ toon('Lamp schakelen lukte niet: ' + e.message); }
 }
+function signaalRij(s){
+  const actie = s.l2 === 'week' ? "kiesTab('week')" : `openL2('${s.l2}')`;
+  return `<li class="signaal ernst${s.ernst}" onclick="${actie}"><span>${esc(s.tekst)}</span></li>`;
+}
 function dagenLabel(d){
   if (d === null || d === undefined) return '';
   if (d < 0) return 'te laat';
@@ -1270,7 +1412,8 @@ async function tvStuur(vraag){
 function renderL2(){
   if (!L2open || !DATA) return;
   document.getElementById('l2Titel').textContent = {
-    taken: '📋 Alles wat loopt', boodschappen: '🛒 Boodschappen',
+    onderwerpen: '📂 Onderwerpen — wat loopt er', aandacht: '💡 Aandacht',
+    boodschappen: '🛒 Boodschappen',
     acties: '⚡ Acties — alles', verjaardagen: '🎂 Verjaardagen & cadeau-ideeën',
     regelzaken: '🔁 Regelzaken — huishoudhandboek', thuis: '🏠 Thuis — via Homey',
   }[L2open];
@@ -1319,16 +1462,27 @@ function renderL2(){
       : '<li class="leeg">Nog geen regelzaken — zeg tegen Birdy: "de grijze bak gaat elke 2 weken aan straat".</li>') + '</ul>';
     document.getElementById('l2Inhoud').innerHTML = html; return;
   }
-  if (L2open === 'taken'){
-    const secties = DATA.overzicht_vol || [];
-    const zicht = secties.map(s => ({ kop: s.kop, items: filterItems(s.items, x => x) }))
-      .filter(s => s.items.length);
-    html = filterChips() + (zicht.length
-      ? `<div class="sectiegrid">` + zicht.map(s =>
-          `<div><h4>${esc(s.kop)}</h4><ul>` +
-          s.items.map(x => `<li><span>${esc(x)}${persChip(x)}</span></li>`).join('') +
-          `</ul></div>`).join('') + `</div>`
-      : '<p class="leeg">niets gevonden voor dit filter</p>');
+  if (L2open === 'onderwerpen'){
+    const items = filterItems(DATA.onderwerpen || [], o => o.naam + ' ' + o.wie);
+    html = filterChips() + '<ul>' + (items.length ? items.map(o =>
+      `<li><span>${esc(o.naam)}${o.wie ? persChip(o.wie) : ''}` +
+      (o.dagen !== null ? `<span class="due ${o.dagen < 0 ? 'laat' : o.dagen <= 1 ? 'nu' : 'straks'}">` +
+        `${esc(o.wanneer)}${o.dagen === 0 ? ' · vandaag' : o.dagen === 1 ? ' · morgen' : o.dagen < 0 ? ' · te laat' : ''}</span>`
+        : (o.wanneer ? `<span class="due straks">${esc(o.wanneer)}</span>` : '')) +
+      (o.stap ? `<br><span class="notitie">→ ${esc(o.stap)}</span>` : '') +
+      (o.notitie ? `<br><span class="notitie">${esc(o.notitie)}</span>` : '') +
+      `</span></li>`).join('')
+      : '<li class="leeg">niets voor dit filter</li>') + '</ul>';
+    html += `<p class="notitie" style="margin-top:.8rem">Uit het Google Doc “Wat loopt er” in de Drive-map — Birdy houdt het bij; zelf aanpassen mag ook.</p>`;
+  } else if (L2open === 'aandacht'){
+    const a = DATA.aandacht || { birdy: { items: [] }, signalen: [] };
+    const b = a.birdy || { items: [] };
+    html = `<h4><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"> Wat Birdy opviel` +
+      (b.tijd ? ` <span class="notitie">· briefing van ${esc(b.tijd)}</span>` : '') + '</h4><ul>' +
+      (b.items.length ? b.items.map(x => `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`).join('')
+        : '<li class="leeg">nog niets — komt bij de volgende ochtendbriefing</li>') + '</ul>';
+    html += '<h4>Signalen uit agenda, acties en handboek</h4><ul>' +
+      ((a.signalen || []).length ? a.signalen.map(signaalRij).join('') : '<li class="leeg">niets dat aandacht vraagt 🙂</li>') + '</ul>';
   } else if (L2open === 'boodschappen' || L2open === 'acties'){
     const items = filterItems(DATA[L2open] || [], x => x.tekst);
     html = filterChips() + '<ul>' +
@@ -1571,12 +1725,28 @@ async function ververs(){
     WEEK = d.week || [];
     document.getElementById('agenda').innerHTML = agendaHtml(d.agenda);
     renderWeek(WEEK);
-    const t = d.taken || {urgent:[],week:[],rest:''};
-    const rows = t.urgent.map(x => `<li class="urgent"><span>${esc(x)}${persChip(x)}</span></li>`)
-      .concat(t.week.map(x => `<li class="week"><span>${esc(x)}${persChip(x)}</span></li>`));
-    document.getElementById('taken').innerHTML =
-      rows.length ? rows.join('') : '<li class="leeg">niets dringends 🎉</li>';
-    document.getElementById('takenrest').textContent = t.rest ? 'verder: ' + t.rest : '';
+    // aandacht: eerst Birdy's punten (herkenbaar), dan de regel-signalen; samen max 5
+    const a = d.aandacht || { birdy: { items: [] }, signalen: [] };
+    const birdyRows = ((a.birdy && a.birdy.items) || []).map(x =>
+      `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`);
+    const sig = a.signalen || [];
+    const sigRows = sig.slice(0, Math.max(2, 5 - birdyRows.length)).map(signaalRij);
+    const rows = birdyRows.concat(sigRows);
+    document.getElementById('aandacht').innerHTML =
+      rows.length ? rows.join('') : '<li class="leeg">niets dat aandacht vraagt 🙂</li>';
+    const restN = sig.length - sigRows.length;
+    document.getElementById('aandachtrest').innerHTML =
+      (a.birdy && a.birdy.tijd ? `<img src="/logo-bird.png" class="bird" onerror="this.remove()">Birdy · ${esc(a.birdy.tijd.slice(-5))}` : '') +
+      (restN > 0 ? `${a.birdy && a.birdy.tijd ? ' · ' : ''}nog ${restN} signa${restN > 1 ? 'len' : 'al'} ↗` : '');
+    // zijbalk: onderwerpen
+    const mo = d.onderwerpen || [];
+    document.getElementById('moCount').textContent = mo.length || '';
+    document.getElementById('moList').innerHTML = mo.length
+      ? mo.slice(0, 3).map(o => `<li><span>${esc(o.naam)}</span>` +
+          `<small class="${o.dagen !== null && o.dagen < 0 ? 'laat' : o.dagen === 0 || o.dagen === 1 ? 'nu' : ''}">` +
+          `${o.dagen !== null ? dagenLabel(o.dagen) : esc(o.wanneer || '')}</small></li>`).join('') +
+        (mo.length > 3 ? `<li class="meer">… nog ${mo.length - 3}</li>` : '')
+      : '<li class="leeg">niets lopends 🎉</li>';
     vulMeer('acties', d.acties || [], taakRij, 12, 'acties');
     const afWrap = document.getElementById('actiesAfWrap');
     afWrap.style.display = (d.acties_af && d.acties_af.length) ? 'block' : 'none';

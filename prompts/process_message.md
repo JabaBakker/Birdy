@@ -11,9 +11,12 @@ Verwerk dit bericht:
    uit je instructies (voorstel → bevestiging → archiveren in Drive). Let op signalen
    voor `VOORKEUREN.md` ("voortaan graag…") en `HERHALEND.md` ("dit komt elke … terug")
    en verwerk die daar.
-2. Werk `TAKEN.md` bij: nieuwe taken (eigenaar + deadline!), afvinken wat klaar gemeld
-   wordt, aanvullen wat verduidelijkt wordt. Nieuwe weetjes over het gezin → `GEZIN.md`.
-3. Werk `OVERZICHT.md` bij en zet één logregel in het journaal van vandaag.
+2. Werk `TAKEN.md` bij: nieuwe onderwerpen (eigenaar + deadline!), afvinken wat klaar
+   gemeld wordt, aanvullen wat verduidelijkt wordt. Nieuwe weetjes over het gezin →
+   `GEZIN.md`. Kleine concrete acties en boodschappen gaan naar Todoist, niet hierheen.
+3. Is er iets aan de onderwerpen veranderd, werk dan `OVERZICHT.md` én het Doc
+   "Wat loopt er" bij (alleen Todoist geraakt → beide overslaan). Zet één logregel in
+   het journaal van vandaag.
 4. Antwoord kort en warm in het Nederlands (1–6 regels): wat je hebt genoteerd of gedaan,
    met eigenaar en datum, plus hoogstens één korte terugvraag als iets echt onduidelijk is.
 
