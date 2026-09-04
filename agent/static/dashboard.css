@@ -497,3 +497,9 @@
                                   padding:.45rem .6rem; font-size:.95rem; font-family:inherit; min-width:0; }
 .vr-form #vrOms, .vr-form #vrRichting { grid-column:1 / -1; }
 .vr-form .aknop { grid-column:1 / -1; margin-top:0; }
+.geld-rij.klik { cursor:pointer; }
+.geld-rij.klik:active { background:rgba(255,255,255,.05); }
+.geld-detail { margin:.1rem 0 .5rem .6rem; padding:.2rem .6rem .3rem; border-left:2px solid var(--lijn); }
+.geld-detail .geld-rij { font-size:.86rem; padding:.18rem 0; }
+.geld-detail .geld-rij:first-of-type { border-top:none; }
+.geld-detail code { font-size:.8rem; color:var(--dim); }

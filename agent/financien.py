@@ -47,7 +47,7 @@ SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 
 TABS: dict[str, list[str]] = {
     "Rekeningen": ["Naam", "IBAN", "Van", "Doel"],
-    "Inkomsten": ["Naam", "Bedrag", "Frequentie", "Komt binnen op", "Hoort bij", "Herkenning", "Notitie"],
+    "Inkomsten": ["Naam", "Bedrag", "Frequentie", "Komt binnen op", "Hoort bij", "Herkenning", "Uitleg", "Notitie"],
     "Vaste lasten": ["Naam", "Categorie", "Bedrag", "Frequentie", "Betaald van", "Hoort bij",
                      "Betaaldag", "Opzegtermijn", "Einddatum", "Herkenning", "Document", "Notitie"],
     "Polissen": ["Verzekering", "Verzekeraar", "Dekking", "Premie", "Frequentie", "Eigen risico",
@@ -79,6 +79,45 @@ VOORBEELDEN: dict[str, list[list]] = {
     ],
     "Uitleg": [],
 }
+
+# uitleg in gewone taal van regelingen die als inkomst binnenkomen; (trefwoorden in de naam,
+# titel, tekst). {bedrag}, {rekening} en {freq} worden ingevuld met de eigen cijfers.
+REGELINGEN: list[tuple[tuple[str, ...], str, str]] = [
+    (("kinderopvangtoeslag", "opvangtoeslag"), "Kinderopvangtoeslag",
+     "Een bijdrage van de overheid in de kosten van kinderopvang. De hoogte hangt af van jullie gezamenlijke "
+     "inkomen, het aantal opvanguren en het uurtarief (tot een maximum). Je krijgt hem maandelijks vooruit als "
+     "voorschot; na afloop van het jaar rekent de Belastingdienst definitief af, dus bij een hoger inkomen of "
+     "minder uren kan een deel terug moeten. Bij jullie: {bedrag} per {freq} op {rekening}, terwijl de opvang "
+     "zelf van de pot gaat — daarom telt dit mee in de verrekening."),
+    (("kinderbijslag",), "Kinderbijslag",
+     "Een vast bedrag per kind van de Sociale Verzekeringsbank, los van jullie inkomen. Het wordt per kwartaal "
+     "achteraf betaald en stijgt als een kind 6 en 12 wordt. Bij jullie: {bedrag} per {freq} op {rekening}."),
+    (("kindgebonden",), "Kindgebonden budget",
+     "Een inkomensafhankelijke toeslag per kind van de Belastingdienst, maandelijks vooruit als voorschot en "
+     "achteraf definitief afgerekend. Bij jullie: {bedrag} per {freq} op {rekening}."),
+    (("teruggaaf", "voorlopige", "ib/pvv"), "Voorlopige teruggaaf inkomstenbelasting",
+     "De Belastingdienst betaalt maandelijks alvast een deel van de verwachte belastingteruggaaf uit, bijvoorbeeld "
+     "door de hypotheekrenteaftrek. Na de aangifte wordt het echte bedrag berekend: te veel ontvangen moet terug, "
+     "te weinig krijg je alsnog. Bij jullie: {bedrag} per {freq} op {rekening}."),
+    (("schenking",), "Schenking",
+     "Een gift die tot een jaarlijks vrijgesteld bedrag belastingvrij is (ouders → kind kent een hogere "
+     "vrijstelling). Bij jullie: {bedrag} per {freq} op {rekening}."),
+    (("zorgtoeslag",), "Zorgtoeslag",
+     "Bijdrage in de zorgpremie voor lagere inkomens, maandelijks vooruit, achteraf afgerekend. Bij jullie: "
+     "{bedrag} per {freq} op {rekening}."),
+    (("huurtoeslag",), "Huurtoeslag",
+     "Bijdrage in de huur voor lagere inkomens, maandelijks vooruit, achteraf afgerekend. Bij jullie: {bedrag} "
+     "per {freq} op {rekening}."),
+]
+
+
+def regeling_uitleg(naam: str, bedrag: float, freq: str, rekening: str) -> tuple[str, str]:
+    n = naam.lower()
+    for woorden, titel, tekst in REGELINGEN:
+        if any(w in n for w in woorden):
+            return titel, tekst.format(bedrag=f"€ {eur(bedrag)}", freq=freq or "maand", rekening=rekening or "?")
+    return "", ""
+
 
 # frequentie → factor naar 'per maand'
 FREQ = {"maand": 1.0, "maandelijks": 1.0, "per maand": 1.0, "kwartaal": 1 / 3, "per kwartaal": 1 / 3,
@@ -292,7 +331,13 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "per_maand": per_maand(r.get("Bedrag"), r.get("Frequentie")),
             "komt_binnen_op": _wie(r.get("Komt binnen op")), "ontvanger": eigenaar(r.get("Komt binnen op")),
             "hoort_bij": _wie(r.get("Hoort bij")), "notitie": str(r.get("Notitie") or ""),
+            "herkenning": str(r.get("Herkenning") or ""),
         })
+        titel, tekst = regeling_uitleg(inkomsten[-1]["naam"], inkomsten[-1]["bedrag"], inkomsten[-1]["frequentie"],
+                                       inkomsten[-1]["komt_binnen_op"])
+        eigen = str(r.get("Uitleg") or "").strip()
+        inkomsten[-1]["regeling"] = titel
+        inkomsten[-1]["uitleg"] = eigen or tekst
 
     # vaste lasten
     lasten = []
@@ -306,6 +351,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "hoort_bij": _wie(r.get("Hoort bij")),
             "betaaldag": r.get("Betaaldag") or "", "opzegtermijn": str(r.get("Opzegtermijn") or ""),
             "einddatum": eind.isoformat() if eind else "", "dagen": (eind - vandaag).days if eind else None,
+            "herkenning": str(r.get("Herkenning") or ""),
             "document": str(r.get("Document") or ""), "notitie": str(r.get("Notitie") or ""),
         })
     per_cat: dict[str, float] = {}
@@ -325,6 +371,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "betaler": eigenaar(r.get("Betaald van")),
             "hoort_bij": _wie(r.get("Hoort bij")), "einddatum": eind.isoformat() if eind else "",
             "dagen": (eind - vandaag).days if eind else None, "opzegtermijn": str(r.get("Opzegtermijn") or ""),
+            "herkenning": str(r.get("Herkenning") or ""),
             "document": str(r.get("Document") or ""), "notitie": str(r.get("Notitie") or ""),
         })
 
@@ -348,6 +395,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "rentevast_tot": rv.isoformat() if rv else "", "rentevast_dagen": (rv - vandaag).days if rv else None,
             "vorm": str(r.get("Aflossingsvorm") or ""), "maandlast": maandlast,
             "rente": rente, "aflossing": aflossing,
+            "bekend": bool(rest or pct or rente),  # zonder restschuld/rente is er niets te verdelen
             "einddatum": eind.isoformat() if eind else "", "document": str(r.get("Document") or ""),
             "notitie": str(r.get("Notitie") or ""),
         })
@@ -358,6 +406,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
         "aflossing": round(sum(d["aflossing"] for d in delen), 2),
         "restschuld": round(sum(d["restschuld"] for d in delen), 2),
         "hoofdsom": round(sum(d["hoofdsom"] for d in delen), 2),
+        "bekend": any(d["bekend"] for d in delen),
     }
 
     # geldstromen → constructies (zelfde naam = één constructie: in − uit)

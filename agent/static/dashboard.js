@@ -1490,57 +1490,62 @@ async function renderGeld(){
   const cats = Object.entries(g.per_categorie || {});
   const catTot = cats.reduce((a, [, n]) => a + n, 0) || 1;
   const kleuren = ['#7fbfa6', '#d9a44e', '#8ab4d8', '#b39ddb', '#e07a6a', '#f2a1c2', '#5b6570'];
-  let html = `<div class="geld-kop"><h2>💶 Geld</h2><span class="notitie">stand ${esc(g.vandaag || '')} · per maand</span>
+  let html = `<div class="geld-kop"><h2>💶 Geld</h2><span class="notitie">stand ${esc(g.vandaag || '')} · per maand · tik op een post voor details</span>
     ${g.link ? `<a href="${esc(g.link)}" target="_blank" rel="noopener">📄 Sheet openen</a>` : ''}
     <button class="klein" onclick="geldLaad(true).then(renderGeld)">↻ vernieuwen</button>
     <button class="klein" onclick="GELDPIN=null;try{sessionStorage.removeItem('birdy-geld-pin')}catch(e){};renderGeld()">🔒 sluiten</button></div>`;
   html += '<div class="geld-grid">';
-  // 1. vaste lasten
+  // 1. vaste lasten + inkomen
+  const lasten = g.vaste_lasten || [];
   html += `<div class="panel"><div class="kaartkop"><span class="ico">📉</span><h2>Vaste lasten</h2></div>
     <div class="geld-groot">${euro(t.vast_pm)}<small>vaste lasten per maand</small></div>
-    ${t.inkomen_pm ? `<div class="geld-rij"><span>Inkomen (${(g.inkomsten || []).length} bronnen)</span><b>${euro(t.inkomen_pm)}</b></div>
+    ${t.inkomen_pm ? `<div class="geld-rij klik" onclick="geldToggle('inkomsten')"><span>Inkomen (${(g.inkomsten || []).length} bronnen) <small>▾</small></span><b>${euro(t.inkomen_pm)}</b></div>
+    <div class="geld-detail" id="gd-inkomsten" hidden>${(g.inkomsten || []).map((i, n) => geldRij(i, 'inkomst', n)).join('')}</div>
     <div class="geld-rij"><span><b>Blijft over voor de rest</b></span><b style="color:${t.over_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_pm)}</b></div>` : ''}
     <div class="geld-balk">${cats.map(([c, n], i) => `<i style="width:${(n / catTot * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(c)}"></i>`).join('')}</div>
-    ${cats.map(([c, n], i) => `<div class="geld-rij"><span><i class="init" style="background:${kleuren[i % kleuren.length]};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>${esc(c)}</span><b>${euro(n)}</b></div>`).join('')}
+    ${cats.map(([c, n], i) => `<div class="geld-rij klik" onclick="geldToggle('cat-${i}')"><span><i class="init" style="background:${kleuren[i % kleuren.length]};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>${esc(c)} <small>▾</small></span><b>${euro(n)}</b></div>
+      <div class="geld-detail" id="gd-cat-${i}" hidden>${lasten.filter(l => l.categorie === c).map((l, n) => geldRij(l, 'last', 'c' + i + '-' + n)).join('')}</div>`).join('')}
     <div class="geld-rij"><span>Polissen</span><b>${euro(t.polissen_pm)}</b></div>
     <div class="geld-rij"><span>Hypotheek</span><b>${euro(h.maandlast)}</b></div>
     ${t.in_pm ? `<div class="geld-rij"><span>Komt terug (constructies)</span><b style="color:var(--accent)">− ${euro(t.in_pm)}</b></div>
     <div class="geld-rij"><span><b>Netto per maand</b></span><b>${euro(t.netto_pm)}</b></div>` : ''}
-    <h4 style="margin-top:.8rem">Grootste posten</h4>
-    ${(g.vaste_lasten || []).slice(0, 8).map(l => `<div class="geld-rij"><span>${esc(l.naam)} <small>· ${esc(l.betaald_van)}${l.hoort_bij !== l.betaald_van ? ' → ' + esc(l.hoort_bij) : ''}</small></span><b>${euro2(l.per_maand)}</b></div>`).join('') || '<p class="leeg">nog geen vaste lasten ingevuld</p>'}
     ${geldUitlegKnop(g, 'vaste lasten', 'Leg in gewone taal uit waar ons geld elke maand naartoe gaat en wat het grootste aandeel is.')}
   </div>`;
   // 2. hypotheek
   const rentePct = h.maandlast ? Math.round(h.rente / h.maandlast * 100) : 0;
   html += `<div class="panel"><div class="kaartkop"><span class="ico">🏠</span><h2>Hypotheek</h2></div>
-    ${h.delen.length ? `<div class="geld-groot">${euro(h.maandlast)}<small>per maand</small></div>
-    <div class="geld-balk"><i style="width:${rentePct}%;background:var(--rood)" title="rente"></i><i style="width:${100 - rentePct}%;background:var(--accent)" title="aflossing"></i></div>
+    ${h.delen.length ? `<div class="geld-groot">${euro(h.maandlast)}<small>per maand</small></div>` +
+    (h.bekend ? `<div class="geld-balk"><i style="width:${rentePct}%;background:var(--rood)" title="rente"></i><i style="width:${100 - rentePct}%;background:var(--accent)" title="aflossing"></i></div>
     <div class="geld-rij"><span><i class="init" style="background:var(--rood);width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>Rente (kost geld)</span><b>${euro(h.rente)}</b></div>
     <div class="geld-rij"><span><i class="init" style="background:var(--accent);width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>Aflossing (bouwt bezit op)</span><b>${euro(h.aflossing)}</b></div>
     <div class="geld-rij"><span>Nog te betalen (restschuld)</span><b>${euro(h.restschuld)}</b></div>
-    <div class="geld-rij"><span>Al afgelost</span><b>${euro(h.hoofdsom - h.restschuld)} <small>(${h.hoofdsom ? Math.round((h.hoofdsom - h.restschuld) / h.hoofdsom * 100) : 0}%)</small></b></div>
-    ${h.delen.map(d => `<div class="geld-rij"><span>${esc(d.deel)} <small>· ${esc(d.vorm)} · ${d.rente_pct}%</small></span><small>${d.rentevast_dagen !== null ? 'rente vast tot ' + esc(d.rentevast_tot) : ''}</small></div>`).join('')}`
+    ${h.hoofdsom ? `<div class="geld-rij"><span>Al afgelost</span><b>${euro(h.hoofdsom - h.restschuld)} <small>(${Math.round((h.hoofdsom - h.restschuld) / h.hoofdsom * 100)}%)</small></b></div>` : ''}`
+    : `<div class="geld-uitleg" style="border-color:var(--dim);background:rgba(255,255,255,.04)">De verdeling rente/aflossing en de restschuld verschijnen zodra in de Sheet (tab Hypotheek) hoofdsom, restschuld, rente en rentevaste periode zijn ingevuld — die staan op de jaaropgave van de hypotheek.</div>`) +
+    h.delen.map((d, n) => geldRij(d, 'hypotheek', n)).join('')
     : '<p class="leeg">nog geen hypotheek ingevuld</p>'}
     ${geldUitlegKnop(g, 'hypotheek', 'Leg in gewone taal uit hoe onze hypotheek werkt: wat rente en aflossing zijn, wat er van ons maandbedrag waarheen gaat, en wat er gebeurt als de rentevaste periode afloopt.')}
   </div>`;
   // 3. polissen
   html += `<div class="panel"><div class="kaartkop"><span class="ico">🛡️</span><h2>Polissen</h2><b>${(g.polissen || []).length || ''}</b></div>
-    ${(g.polissen || []).map(p => `<div class="geld-rij"><span>${esc(p.naam)} <small>· ${esc(p.verzekeraar)}${p.eigen_risico ? ' · eigen risico ' + euro(p.eigen_risico) : ''}</small></span>
-      ${p.dagen !== null ? `<small class="${p.dagen < 45 ? 'laat' : ''}" style="${p.dagen < 45 ? 'color:var(--amber)' : ''}">${p.dagen < 0 ? 'verlopen' : 'tot ' + esc(p.einddatum)}</small>` : ''}<b>${euro2(p.per_maand)}</b></div>`).join('') || '<p class="leeg">nog geen polissen ingevuld</p>'}
+    ${(g.polissen || []).map((p, n) => geldRij(p, 'polis', n)).join('') || '<p class="leeg">nog geen polissen ingevuld</p>'}
     ${geldUitlegKnop(g, 'polissen', 'Leg in gewone taal uit welke verzekeringen we hebben, waar ze voor zijn, wat eigen risico betekent en waar we op moeten letten bij opzeggen.')}
   </div>`;
-  // 4. constructies + verrekenen (pot-model: structureel uit het register + losse posten)
+  // 4. constructies + regelingen
+  const regelingen = (g.inkomsten || []).filter(i => i.regeling || i.uitleg);
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies & regelingen</h2></div>
+    ${(g.constructies || []).map((c, n) => `<div class="geld-rij klik" onclick="geldToggle('con-${n}')"><span>${esc(c.naam)} <small>▾</small><br><small>uit ${euro(c.uit_pm)} · terug ${euro(c.in_pm)} per maand</small></span><b style="color:${c.netto_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${c.netto_pm >= 0 ? '+' : '−'} ${euro(Math.abs(c.netto_pm))}</b></div>
+      <div class="geld-detail" id="gd-con-${n}" hidden>${c.uitleg ? `<div class="geld-uitleg">${esc(c.uitleg)}</div>` : ''}${c.stromen.map(st => `<div class="geld-rij"><span>${st.richting === 'in' ? '⬅ komt binnen' : '➡ gaat weg'} <small>· ${esc(st.van)} → ${esc(st.naar)} · hoort bij ${esc(st.hoort_bij)}</small></span><b>${euro2(st.bedrag)}<small> /${esc(st.frequentie)}</small></b></div>`).join('')}</div>`).join('') || ''}
+    ${regelingen.length ? '<h4 style="margin-top:.6rem">Toeslagen & regelingen</h4>' + regelingen.map((i, n) => `<div class="geld-rij klik" onclick="geldToggle('reg-${n}')"><span>${esc(i.regeling || i.naam)} <small>▾ · ${esc(i.komt_binnen_op)} · hoort bij ${esc(i.hoort_bij)}</small></span><b>${euro(i.per_maand)}<small> /mnd</small></b></div>
+      <div class="geld-detail" id="gd-reg-${n}" hidden><div class="geld-uitleg">${esc(i.uitleg)}</div>${i.notitie ? `<p class="notitie">${esc(i.notitie)}</p>` : ''}</div>`).join('') : ''}
+    ${(g.inleg || []).length ? '<h4 style="margin-top:.6rem">Afspraak: inleg op de pot</h4>' + g.inleg.map(c => `<div class="geld-rij"><span>${esc(c.naam)} <small>· ${esc((c.stromen[0] || {}).uitleg || '')}</small></span><b>${euro(c.uit_pm)}<small> /mnd</small></b></div>`).join('') : ''}
+    ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen, toeslagen en constructies werken, en wat de inleg-afspraak inhoudt.')}
+  </div>`;
+  // 5. verrekenen (pot-model: losse posten + structureel uit het register)
   const vr = VERREKEN || { posten: [], afrekeningen: [] };
   const open = vr.posten.filter(p => !p.verrekend);
   const saldoLos = {};
   open.forEach(p => { saldoLos[p.wie] = Math.round(((saldoLos[p.wie] || 0) + (p.richting === 'voor_pot' ? p.bedrag : -p.bedrag)) * 100) / 100; });
   const personen = [...new Set([...(v.personen || []), ...PERSONEN.slice(0, 2)])].filter(Boolean);
-  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies</h2></div>
-    ${(g.constructies || []).map(c => `<div class="geld-rij"><span>${esc(c.naam)}<br><small>uit ${euro(c.uit_pm)} · terug ${euro(c.in_pm)} per maand</small></span><b style="color:${c.netto_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${c.netto_pm >= 0 ? '+' : '−'} ${euro(Math.abs(c.netto_pm))}</b></div>
-      ${c.uitleg ? `<div class="geld-uitleg">${esc(c.uitleg)}</div>` : ''}`).join('') || '<p class="leeg">geen constructies</p>'}
-    ${(g.inleg || []).length ? '<h4 style="margin-top:.6rem">Afspraak: inleg op de pot</h4>' + g.inleg.map(c => `<div class="geld-rij"><span>${esc(c.naam)}</span><b>${euro(c.uit_pm)}<small> /mnd</small></b></div>`).join('') : ''}
-    ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen en constructies werken, en wat de inleg-afspraak inhoudt.')}
-  </div>`;
   html += `<div class="panel"><div class="kaartkop"><span class="ico">⚖️</span><h2>Verrekenen</h2><b>${open.length || ''}</b></div>
     <p class="notitie">Iets privé betaald dat van de pot (gezamenlijk) had moeten komen? Zet het hier; einde maand druk je op Afrekenen.</p>
     <div class="vr-form">
@@ -1561,6 +1566,39 @@ async function renderGeld(){
   </div>`;
   html += '</div>' + geldWoordenlijst(g);
   el.innerHTML = html;
+}
+function geldToggle(id){ const d = document.getElementById('gd-' + id); if (d) d.hidden = !d.hidden; }
+// één post als open-te-klikken rij met details: rekening, wie, frequentie, betaaldag, opzegtermijn, document…
+function geldRij(x, soort, n){
+  const id = `${soort}-${n}`;
+  const naam = x.naam || x.deel || '';
+  const bedragTekst = soort === 'hypotheek' ? euro2(x.maandlast) : euro2(x.per_maand) + (x.frequentie && x.frequentie !== 'maand' ? `<small> /mnd (${euro2(x.bedrag)} per ${esc(x.frequentie)})</small>` : '');
+  const sub = soort === 'inkomst' ? `${esc(x.komt_binnen_op)} · hoort bij ${esc(x.hoort_bij)}`
+            : soort === 'hypotheek' ? `${esc(x.verstrekker || '')}${x.vorm ? ' · ' + esc(x.vorm) : ''}${x.rente_pct ? ' · ' + x.rente_pct + '%' : ''}`
+            : `${esc(x.betaald_van)}${x.hoort_bij && x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}${soort === 'polis' && x.verzekeraar ? ' · ' + esc(x.verzekeraar) : ''}`;
+  const badge = (x.dagen !== null && x.dagen !== undefined) ? `<small style="${x.dagen < 45 ? 'color:var(--amber)' : ''}">${x.dagen < 0 ? 'verlopen' : 'tot ' + esc(x.einddatum)}</small>` : '';
+  const det = [];
+  const rij = (k, v) => v !== undefined && v !== null && v !== '' && det.push(`<div class="geld-rij"><span>${k}</span><b style="font-weight:500">${v}</b></div>`);
+  if (soort === 'hypotheek'){
+    rij('Verstrekker', esc(x.verstrekker)); rij('Maandlast', euro2(x.maandlast));
+    if (x.bekend){ rij('Waarvan rente', euro2(x.rente)); rij('Waarvan aflossing', euro2(x.aflossing)); rij('Restschuld', euro(x.restschuld)); rij('Hoofdsom', x.hoofdsom ? euro(x.hoofdsom) : ''); rij('Rente', x.rente_pct ? x.rente_pct + '%' : ''); rij('Rente vast tot', esc(x.rentevast_tot)); rij('Vorm', esc(x.vorm)); rij('Loopt tot', esc(x.einddatum)); }
+    else det.push('<p class="notitie">Vul hoofdsom, restschuld, rente en rentevaste periode in de Sheet in voor de details.</p>');
+  } else {
+    rij('Bedrag', `${euro2(x.bedrag !== undefined ? x.bedrag : x.premie)} per ${esc(x.frequentie || 'maand')}`);
+    if (x.frequentie && x.frequentie !== 'maand') rij('Per maand', euro2(x.per_maand));
+    rij(soort === 'inkomst' ? 'Komt binnen op' : 'Betaald van', esc(soort === 'inkomst' ? x.komt_binnen_op : x.betaald_van));
+    rij('Hoort bij', esc(x.hoort_bij));
+    rij('Categorie', esc(x.categorie)); rij('Dekking', esc(x.dekking)); rij('Verzekeraar', esc(x.verzekeraar));
+    if (x.eigen_risico) rij('Eigen risico', euro(x.eigen_risico));
+    rij('Betaaldag', x.betaaldag ? 'de ' + esc(String(x.betaaldag)) + 'e' : '');
+    rij('Opzegtermijn', esc(x.opzegtermijn)); rij('Einddatum', esc(x.einddatum));
+    rij('Herkenning', x.herkenning ? `<code>${esc(x.herkenning)}</code>` : '');
+  }
+  rij('Document', x.document ? (/^https?:/.test(x.document) ? `<a href="${esc(x.document)}" target="_blank" rel="noopener">📄 openen</a>` : esc(x.document)) : '');
+  if (x.uitleg && soort === 'inkomst') det.push(`<div class="geld-uitleg">${esc(x.uitleg)}</div>`);
+  if (x.notitie) det.push(`<p class="notitie">${esc(x.notitie)}</p>`);
+  return `<div class="geld-rij klik" onclick="geldToggle('${id}')"><span>${esc(naam)} <small>▾ · ${sub}</small></span>${badge}<b>${bedragTekst}</b></div>
+    <div class="geld-detail" id="gd-${id}" hidden>${det.join('')}</div>`;
 }
 function geldUitlegKnop(g, onderwerp, vraag){
   const u = (g.uitleg || {})[onderwerp];
