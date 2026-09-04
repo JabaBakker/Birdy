@@ -53,6 +53,14 @@ class Config:
     # Kiosk-dashboard (muurtablet). Token gezet = dashboard aan; ontsluiting via Tailscale.
     dashboard_token: str = field(default_factory=lambda: os.environ.get("DASHBOARD_TOKEN", ""))
     dashboard_port: int = field(default_factory=lambda: _env_int("DASHBOARD_PORT", 8811))
+    # Geld-tab: pincode (4-8 cijfers) die per apparaat één keer gevraagd wordt; leeg = tab uit
+    dashboard_geld_pin: str = field(default_factory=lambda: os.environ.get("DASHBOARD_GELD_PIN", "").strip())
+    # Verdeling van gezamenlijke kosten bij het verrekenen, bijv. "Jaap:60,Yvette:40"; leeg = gelijk
+    financien_verdeling: dict = field(default_factory=lambda: {
+        k.strip(): float(v) / 100 for k, _, v in
+        (x.partition(":") for x in os.environ.get("FINANCIEN_VERDELING", "").split(",") if ":" in x)
+        if v.strip().replace(".", "").isdigit()
+    })
     # Namen voor de kleurcodering in de weekweergave (komma-gescheiden)
     dashboard_personen: list[str] = field(default_factory=lambda: [
         x.strip() for x in os.environ.get("DASHBOARD_PERSONEN", "").split(",")

@@ -461,3 +461,34 @@
                         background:var(--accent); color:#14171a; cursor:pointer; font-size:.95rem; }
   #sleutel { display:none; padding:2rem; text-align:center; }
   #sleutel input { font-size:1.05rem; padding:.6rem; border-radius:8px; border:1px solid #444; }
+
+/* ── geld-tab ── */
+#paneelGeld { max-width:1200px; }
+.geld-pin { max-width:360px; margin:8vh auto; text-align:center; }
+.geld-pin input { width:100%; font-size:1.6rem; letter-spacing:.5rem; text-align:center; background:var(--panel);
+                  border:1px solid var(--lijn); border-radius:12px; color:var(--ink); padding:.6rem; margin:.8rem 0; }
+.geld-pin button { background:var(--accent); color:#14171a; border:none; border-radius:10px; padding:.6rem 1.2rem;
+                   font-size:1rem; font-weight:700; cursor:pointer; }
+.geld-kop { display:flex; align-items:center; gap:.8rem; margin:0 .2rem .8rem; flex-wrap:wrap; }
+.geld-kop h2 { font-size:1.15rem; }
+.geld-kop .notitie { margin-left:auto; }
+.geld-kop a, .geld-kop button.klein { border:1px solid var(--lijn); background:var(--panel); color:var(--ink);
+  border-radius:9px; padding:.3rem .7rem; font-size:.85rem; cursor:pointer; text-decoration:none; }
+.geld-grid { display:grid; gap:.9rem; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); align-items:start; }
+.geld-groot { font-size:1.7rem; font-weight:750; letter-spacing:-.01em; }
+.geld-groot small { font-size:.85rem; font-weight:400; color:var(--dim); margin-left:.3rem; }
+.geld-rij { display:flex; gap:.6rem; align-items:baseline; padding:.28rem 0; border-top:1px solid rgba(255,255,255,.04); font-size:.92rem; }
+.geld-rij:first-of-type { border-top:none; }
+.geld-rij span { flex:1; min-width:0; }
+.geld-rij b { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.geld-rij small { color:var(--dim); font-size:.78rem; white-space:nowrap; }
+.geld-balk { height:8px; border-radius:99px; background:rgba(255,255,255,.07); overflow:hidden; margin:.4rem 0 .6rem; display:flex; }
+.geld-balk i { display:block; height:100%; }
+.geld-uitleg { background:rgba(217,164,78,.10); border-left:3px solid var(--amber); border-radius:10px; padding:.55rem .75rem;
+               margin:.5rem 0; font-size:.92rem; line-height:1.45; white-space:pre-wrap; }
+.geld-wl details { border-top:1px solid var(--lijn); padding:.4rem 0; }
+.geld-wl summary { cursor:pointer; font-weight:600; font-size:.95rem; list-style:none; }
+.geld-wl summary::before { content:"› "; color:var(--accent); }
+.geld-wl details[open] summary::before { content:"⌄ "; }
+.geld-wl p { color:var(--dim); font-size:.9rem; margin:.3rem 0 .2rem 1rem; line-height:1.45; }
+.geld-saldo { font-size:1.05rem; font-weight:650; margin:.3rem 0 .5rem; }

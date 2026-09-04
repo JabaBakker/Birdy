@@ -16,11 +16,14 @@ function kiesTab(t){
   document.getElementById('paneelVandaag').style.display = t === 'vandaag' ? 'grid' : 'none';
   document.getElementById('paneelWeek').style.display = t === 'week' ? 'block' : 'none';
   document.getElementById('paneelPlan').style.display = t === 'plan' ? 'block' : 'none';
+  document.getElementById('paneelGeld').style.display = t === 'geld' ? 'block' : 'none';
   document.getElementById('tabVandaag').classList.toggle('actief', t === 'vandaag');
   document.getElementById('tabWeek').classList.toggle('actief', t === 'week');
   document.getElementById('tabPlan').classList.toggle('actief', t === 'plan');
-  try { localStorage.setItem('birdy-tab', t); } catch(e){}
+  document.getElementById('tabGeld').classList.toggle('actief', t === 'geld');
+  try { localStorage.setItem('birdy-tab', t === 'geld' ? 'vandaag' : t); } catch(e){}  // geld nooit als starttab
   if (t === 'plan') renderPlan();
+  if (t === 'geld') renderGeld();
 }
 
 function vul(id, items, maak){ const el = document.getElementById(id);
@@ -730,6 +733,7 @@ async function ververs(){
     document.getElementById('klok').textContent = d.nu;
     DATA = d;
     PERSONEN = d.personen || [];
+    document.getElementById('tabGeld').style.display = d.geld_tab ? '' : 'none';
     if (WEEKOFFSET === 0){ WEEK = d.week || []; renderWeek(WEEK); }  // andere week: laten staan
     // vandaag-agenda: tijdlijn uit dezelfde weekdata (indexen verwijzen naar WEEK voor de detailkaart)
     const wk = (d.week || []).map((e, i) => Object.assign({}, e, { _i: i }));
@@ -1459,4 +1463,105 @@ document.getElementById('tvVeld').addEventListener('keydown',
 // ── PWA: installeerbaar op het beginscherm van telefoon/tablet ──
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+}
+
+// ── Geld-tab: financieel register uit de Sheet, achter een pincode (per apparaat één keer) ──
+let GELD = null, GELDPIN = null;
+try { GELDPIN = sessionStorage.getItem('birdy-geld-pin'); } catch(e){}
+function euro(n){ return '€ ' + (Math.round(n || 0)).toLocaleString('nl-NL'); }
+function euro2(n){ return '€ ' + (n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+async function renderGeld(){
+  const el = document.getElementById('paneelGeld');
+  if (!GELDPIN){
+    el.innerHTML = `<div class="geld-pin"><h2>🔒 Geld</h2><p class="notitie">Pincode om het financieel overzicht te openen</p>
+      <input id="geldPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off"
+        onkeydown="if(event.key==='Enter')geldOntgrendel()">
+      <button onclick="geldOntgrendel()">Openen</button></div>`;
+    setTimeout(() => { const i = document.getElementById('geldPin'); if (i) i.focus(); }, 50);
+    return;
+  }
+  if (!GELD){ el.innerHTML = '<p class="leeg" style="margin:2rem">overzicht laden…</p>'; await geldLaad(); if (!GELD) return; }
+  const g = GELD;
+  if (!g.beschikbaar){
+    el.innerHTML = `<div class="geld-kop"><h2>💶 Geld</h2></div><p class="leeg">Nog geen register. Vraag Birdy: “maak het financieel overzicht aan” (of draai <code>financien.py maak</code>).</p>` + geldWoordenlijst(g);
+    return;
+  }
+  const t = g.totalen, h = g.hypotheek, v = g.verrekening;
+  const cats = Object.entries(g.per_categorie || {});
+  const catTot = cats.reduce((a, [, n]) => a + n, 0) || 1;
+  const kleuren = ['#7fbfa6', '#d9a44e', '#8ab4d8', '#b39ddb', '#e07a6a', '#f2a1c2', '#5b6570'];
+  let html = `<div class="geld-kop"><h2>💶 Geld</h2><span class="notitie">stand ${esc(g.vandaag || '')} · per maand</span>
+    ${g.link ? `<a href="${esc(g.link)}" target="_blank" rel="noopener">📄 Sheet openen</a>` : ''}
+    <button class="klein" onclick="geldLaad(true).then(renderGeld)">↻ vernieuwen</button>
+    <button class="klein" onclick="GELDPIN=null;try{sessionStorage.removeItem('birdy-geld-pin')}catch(e){};renderGeld()">🔒 sluiten</button></div>`;
+  html += '<div class="geld-grid">';
+  // 1. vaste lasten
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">📉</span><h2>Vaste lasten</h2></div>
+    <div class="geld-groot">${euro(t.vast_pm)}<small>per maand alles bij elkaar</small></div>
+    <div class="geld-balk">${cats.map(([c, n], i) => `<i style="width:${(n / catTot * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(c)}"></i>`).join('')}</div>
+    ${cats.map(([c, n], i) => `<div class="geld-rij"><span><i class="init" style="background:${kleuren[i % kleuren.length]};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>${esc(c)}</span><b>${euro(n)}</b></div>`).join('')}
+    <div class="geld-rij"><span>Polissen</span><b>${euro(t.polissen_pm)}</b></div>
+    <div class="geld-rij"><span>Hypotheek</span><b>${euro(h.maandlast)}</b></div>
+    ${t.in_pm ? `<div class="geld-rij"><span>Komt terug (constructies)</span><b style="color:var(--accent)">− ${euro(t.in_pm)}</b></div>
+    <div class="geld-rij"><span><b>Netto per maand</b></span><b>${euro(t.netto_pm)}</b></div>` : ''}
+    <h4 style="margin-top:.8rem">Grootste posten</h4>
+    ${(g.vaste_lasten || []).slice(0, 8).map(l => `<div class="geld-rij"><span>${esc(l.naam)} <small>· ${esc(l.betaald_van)}${l.hoort_bij !== l.betaald_van ? ' → ' + esc(l.hoort_bij) : ''}</small></span><b>${euro2(l.per_maand)}</b></div>`).join('') || '<p class="leeg">nog geen vaste lasten ingevuld</p>'}
+    ${geldUitlegKnop(g, 'vaste lasten', 'Leg in gewone taal uit waar ons geld elke maand naartoe gaat en wat het grootste aandeel is.')}
+  </div>`;
+  // 2. hypotheek
+  const rentePct = h.maandlast ? Math.round(h.rente / h.maandlast * 100) : 0;
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🏠</span><h2>Hypotheek</h2></div>
+    ${h.delen.length ? `<div class="geld-groot">${euro(h.maandlast)}<small>per maand</small></div>
+    <div class="geld-balk"><i style="width:${rentePct}%;background:var(--rood)" title="rente"></i><i style="width:${100 - rentePct}%;background:var(--accent)" title="aflossing"></i></div>
+    <div class="geld-rij"><span><i class="init" style="background:var(--rood);width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>Rente (kost geld)</span><b>${euro(h.rente)}</b></div>
+    <div class="geld-rij"><span><i class="init" style="background:var(--accent);width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>Aflossing (bouwt bezit op)</span><b>${euro(h.aflossing)}</b></div>
+    <div class="geld-rij"><span>Nog te betalen (restschuld)</span><b>${euro(h.restschuld)}</b></div>
+    <div class="geld-rij"><span>Al afgelost</span><b>${euro(h.hoofdsom - h.restschuld)} <small>(${h.hoofdsom ? Math.round((h.hoofdsom - h.restschuld) / h.hoofdsom * 100) : 0}%)</small></b></div>
+    ${h.delen.map(d => `<div class="geld-rij"><span>${esc(d.deel)} <small>· ${esc(d.vorm)} · ${d.rente_pct}%</small></span><small>${d.rentevast_dagen !== null ? 'rente vast tot ' + esc(d.rentevast_tot) : ''}</small></div>`).join('')}`
+    : '<p class="leeg">nog geen hypotheek ingevuld</p>'}
+    ${geldUitlegKnop(g, 'hypotheek', 'Leg in gewone taal uit hoe onze hypotheek werkt: wat rente en aflossing zijn, wat er van ons maandbedrag waarheen gaat, en wat er gebeurt als de rentevaste periode afloopt.')}
+  </div>`;
+  // 3. polissen
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🛡️</span><h2>Polissen</h2><b>${(g.polissen || []).length || ''}</b></div>
+    ${(g.polissen || []).map(p => `<div class="geld-rij"><span>${esc(p.naam)} <small>· ${esc(p.verzekeraar)}${p.eigen_risico ? ' · eigen risico ' + euro(p.eigen_risico) : ''}</small></span>
+      ${p.dagen !== null ? `<small class="${p.dagen < 45 ? 'laat' : ''}" style="${p.dagen < 45 ? 'color:var(--amber)' : ''}">${p.dagen < 0 ? 'verlopen' : 'tot ' + esc(p.einddatum)}</small>` : ''}<b>${euro2(p.per_maand)}</b></div>`).join('') || '<p class="leeg">nog geen polissen ingevuld</p>'}
+    ${geldUitlegKnop(g, 'polissen', 'Leg in gewone taal uit welke verzekeringen we hebben, waar ze voor zijn, wat eigen risico betekent en waar we op moeten letten bij opzeggen.')}
+  </div>`;
+  // 4. constructies + verrekening
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies & verrekenen</h2></div>
+    ${(g.constructies || []).map(c => `<div class="geld-rij"><span>${esc(c.naam)}<br><small>uit ${euro(c.uit_pm)} · terug ${euro(c.in_pm)} per maand</small></span><b style="color:${c.netto_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${c.netto_pm >= 0 ? '+' : '−'} ${euro(Math.abs(c.netto_pm))}</b></div>
+      ${c.uitleg ? `<div class="geld-uitleg">${esc(c.uitleg)}</div>` : ''}`).join('') || ''}
+    <h4 style="margin-top:.6rem">Verrekenen</h4>
+    <div class="geld-saldo">${esc(v.tekst || 'nog niets om te verrekenen')}</div>
+    ${(v.regels || []).slice(0, 8).map(r => `<div class="geld-rij"><span>${esc(r.wat)} <small>· ${esc(r.tekst)}</small></span><b>${euro2(r.bedrag)}</b></div>`).join('')}
+    <p class="notitie" style="margin-top:.5rem">Gezamenlijke kosten worden ${Object.keys(v.verdeling || {}).length ? Object.entries(v.verdeling).map(([p, a]) => esc(p) + ' ' + Math.round(a * 100) + '%').join(' / ') : 'gelijk'} verdeeld.</p>
+    ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen en constructies werken en wie wat aan wie moet overmaken om het eerlijk te houden.')}
+  </div>`;
+  html += '</div>' + geldWoordenlijst(g);
+  el.innerHTML = html;
+}
+function geldUitlegKnop(g, onderwerp, vraag){
+  const u = (g.uitleg || {})[onderwerp];
+  return (u && u.tekst ? `<div class="geld-uitleg">🐦 ${esc(u.tekst)}${u.bijgewerkt ? `<br><small class="notitie">Birdy · ${esc(u.bijgewerkt)}</small>` : ''}</div>` : '') +
+    `<button class="aknop" onclick="stuur(${JSON.stringify(vraag + ' Gebruik onze eigen cijfers (financien.py toon).')})">🐦 ${u && u.tekst ? 'Opnieuw uitleggen' : 'Leg uit met onze cijfers'}</button>`;
+}
+function geldWoordenlijst(g){
+  return `<div class="panel geld-wl" style="margin-top:.9rem"><div class="kaartkop"><span class="ico">📖</span><h2>Woordenlijst</h2></div>` +
+    (g.woordenlijst || []).map(([w, u]) => `<details><summary>${esc(w)}</summary><p>${esc(u)}</p></details>`).join('') + '</div>';
+}
+async function geldLaad(ververs){
+  try {
+    const r = await fetch('/api/geld' + (ververs ? '?ververs=1' : ''), { headers: { 'X-Dashboard-Key': KEY, 'X-Geld-Pin': GELDPIN || '' } });
+    const d = await r.json();
+    if (r.status === 403){ GELDPIN = null; try { sessionStorage.removeItem('birdy-geld-pin'); } catch(e){} toon(d.error || 'pincode klopt niet'); GELD = null; renderGeld(); return; }
+    if (!r.ok) throw new Error(d.error || 'fout');
+    GELD = d;
+  } catch(e){ toon('Financieel overzicht laden lukte even niet.'); }
+}
+async function geldOntgrendel(){
+  const pin = (document.getElementById('geldPin').value || '').trim();
+  if (!pin) return;
+  GELDPIN = pin; GELD = null;
+  await geldLaad();
+  if (GELD){ try { sessionStorage.setItem('birdy-geld-pin', pin); } catch(e){} renderGeld(); }
 }

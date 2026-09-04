@@ -23,7 +23,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import agenda, bronnen, signalen, todoist
+from . import agenda, bronnen, financien, signalen, todoist
 from .brain import Brain
 from .config import Config
 
@@ -64,6 +64,8 @@ class Dashboard:
         self._traag_ts = 0.0
         self._bouw_lock = asyncio.Lock()
         self._agenda_cache: dict[tuple, tuple[float, list]] = {}  # /api/agenda: (van,tot,zoek) → (ts, events)
+        self._geld: dict | None = None  # financieel register (Sheet), eigen cache van 5 min
+        self._geld_ts = 0.0
         self._runner: web.AppRunner | None = None
 
     def _invalidate(self, ook_traag: bool = False) -> None:
@@ -79,6 +81,7 @@ class Dashboard:
         app.router.add_get("/", self.page)
         for naam in STATIC_BESTANDEN:
             app.router.add_get(f"/{naam}", self.static)
+        app.router.add_get("/api/geld", self.geld)
         app.router.add_get("/api/plan", self.plan_get)
         app.router.add_post("/api/plan", self.plan_post)
         app.router.add_get("/api/overview", self.overview)
@@ -135,6 +138,32 @@ class Dashboard:
             raise web.HTTPNotFound()  # de pagina valt dan terug op het vogel-emoji
         return web.Response(body=pad.read_bytes(), content_type="image/png",
                             headers={"Cache-Control": "max-age=86400"})
+
+    # -- geld: financieel register achter een pincode ------------------------
+
+    async def _geld_lees(self) -> dict:
+        if self._geld is None or time.time() - self._geld_ts > 300:
+            try:
+                self._geld = await asyncio.to_thread(financien.register, None, None,
+                                                     self.cfg.financien_verdeling or None)
+            except BaseException:
+                log.warning("financieel register lezen mislukt", exc_info=True)
+                self._geld = self._geld or {"beschikbaar": False, "link": "", "woordenlijst": financien.WOORDENLIJST}
+            self._geld_ts = time.time()
+        return self._geld
+
+    async def geld(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        if not self.cfg.dashboard_geld_pin:
+            return web.json_response({"error": "geen pincode ingesteld (DASHBOARD_GELD_PIN)"}, status=403)
+        if request.headers.get("X-Geld-Pin", "") != self.cfg.dashboard_geld_pin:
+            await asyncio.sleep(0.8)  # raden ontmoedigen
+            return web.json_response({"error": "pincode klopt niet"}, status=403)
+        if request.query.get("ververs") == "1":
+            self._geld = None
+        data = await self._geld_lees()
+        return web.json_response(data, headers={"Cache-Control": "no-store"})
 
     # -- gedeelde kinderplanning (zelfde timer op tablet én telefoon) -------
 
@@ -239,8 +268,10 @@ class Dashboard:
             "aandacht": {
                 "birdy": bronnen.aandacht_birdy(self.cfg.workspace),
                 "signalen": signalen.bereken(acties, self._traag.get("regelzaken", []),
-                                      self._traag["verjaardagen"], self._traag["week"], onderwerpen),
+                                      self._traag["verjaardagen"], self._traag["week"], onderwerpen)
+                            + (((await self._geld_lees()).get("signalen", []))[:3] if self.cfg.dashboard_geld_pin else []),
             },
+            "geld_tab": bool(self.cfg.dashboard_geld_pin),
             "boodschappen": boodschappen,
             "acties": acties,
             "boodschappen_af": boodschappen_af,

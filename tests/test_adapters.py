@@ -227,6 +227,8 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                 async with s.get("http://127.0.0.1:18811/api/plan", headers={"X-Dashboard-Key": "geheim"}) as r:
                     pj = await r.json()
                     self.assertEqual(pj["plan"]["gekozen"], [0]); self.assertEqual(pj["bijgewerkt"], ts)
+                async with s.get("http://127.0.0.1:18811/api/geld", headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 403)  # geen pincode ingesteld in de test
                 async with s.get("http://127.0.0.1:18811/manifest.webmanifest") as r:
                     self.assertEqual(r.status, 200)
                 async with s.get("http://127.0.0.1:18811/sw.js") as r:
@@ -375,6 +377,38 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         ics["u1@2026-09-25T20:00"]["start"]["dateTime"] = "2026-09-25T19:30:00"
         _, bijwerken, _ = _sync_plan("V", ics, google)
         self.assertEqual([i for i, _ in bijwerken], ["g1"])
+
+    def test_financien_register(self):
+        from datetime import date
+        from openpyxl import Workbook
+        from agent import financien
+        wb = Workbook(); wb.remove(wb.active)
+        for tab, kolommen in financien.TABS.items():
+            wb.create_sheet(tab).append(kolommen)
+        wb["Vaste lasten"].append(["Energie", "Wonen", 180, "maand", "gezamenlijk", "gezamenlijk", 1, "", "", "", ""])
+        wb["Vaste lasten"].append(["Netflix", "Abonnementen", "€ 15,99", "maand", "Jaap", "gezamenlijk", 12, "1 maand", "20-09-2026", "", ""])
+        wb["Vaste lasten"].append(["Sportschool Yvette", "Sport", 600, "jaar", "gezamenlijk", "Yvette", "", "", "", "", ""])
+        wb["Polissen"].append(["Autoverzekering", "ANWB", "WA+", 62, "maand", 150, "Jaap", "gezamenlijk", "31-12-2026", "1 maand", "", ""])
+        wb["Hypotheek"].append(["Deel 1", "ING", 300000, 250000, 3.0, "01-12-2026", "annuïteit", 1450, "", "", "", "", ""])
+        wb["Geldstromen"].append(["Lening vader", "uit", 600, "maand", "gezamenlijk", "vader", "gezamenlijk", "Familie", "betaling"])
+        wb["Geldstromen"].append(["Lening vader", "in", 1800, "kwartaal", "vader", "gezamenlijk", "gezamenlijk", "Familie", "komt terug"])
+        r = financien.register(wb, vandaag=date(2026, 9, 2))
+        self.assertTrue(r["beschikbaar"])
+        pm = {l["naam"]: l["per_maand"] for l in r["vaste_lasten"]}
+        self.assertEqual(pm["Netflix"], 15.99); self.assertEqual(pm["Sportschool Yvette"], 50.0)
+        self.assertEqual(r["per_categorie"]["Wonen"], 180.0)
+        c = r["constructies"][0]
+        self.assertEqual((c["uit_pm"], c["in_pm"], c["netto_pm"]), (600.0, 600.0, 0.0))
+        h = r["hypotheek"]; self.assertEqual(h["rente"], 625.0); self.assertEqual(h["aflossing"], 825.0)
+        # verrekening: Jaap betaalde 15.99 + 62 gezamenlijk (helft terug), Yvette kreeg 50/mnd van gezamenlijk
+        v = r["verrekening"]; self.assertEqual(v["personen"], ["Jaap", "Yvette"])
+        self.assertAlmostEqual(v["saldo"]["Jaap"], 39.0, places=1); self.assertAlmostEqual(v["saldo"]["Yvette"], -89.0, places=1)
+        self.assertIn("Yvette moet Jaap", v["tekst"])
+        teksten = [s["tekst"] for s in r["signalen"]]
+        self.assertTrue(any("Netflix" in t and "op te zeggen" in t for t in teksten))  # 20-09 − 1 maand ≈ nu
+        self.assertTrue(any("Rentevaste periode" in t for t in teksten))          # 01-12 binnen 180 dagen
+        self.assertFalse(any("Autoverzekering" in t for t in teksten))           # 31-12 − 1 maand > 21 dagen
+        self.assertEqual(r["totalen"]["in_pm"], 600.0)
 
     def test_dubbelingen(self):
         from agent.signalen import dubbelingen
