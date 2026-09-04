@@ -1537,7 +1537,8 @@ async function renderGeld(){
   html += `<div class="panel"><div class="kaartkop"><span class="ico">💰</span><h2>Inkomen & budget</h2></div>
     ${t.inkomen_pm ? `<div class="geld-rij klik" onclick="geldToggle('inkomsten')"><span>Inkomen (${(g.inkomsten || []).length} bronnen) <small>▾</small></span><b>${euro(t.inkomen_pm)}</b></div>
     <div class="geld-detail" id="gd-inkomsten" hidden>${(g.inkomsten || []).map((i, n) => geldRij(i, 'inkomst', n)).join('')}</div>` : '<p class="leeg">nog geen inkomsten ingevuld (tab Inkomsten)</p>'}
-    <div class="geld-rij"><span>Vaste lasten${t.in_pm ? ' (na wat terugkomt)' : ''}</span><b>− ${euro(t.netto_pm)}</b></div>
+    <div class="geld-rij"><span>Vaste lasten <small>· incl. hypotheek, polissen en constructies</small></span><b>− ${euro(t.vast_pm)}</b></div>
+    ${t.in_pm ? `<div class="geld-rij"><span>Komt structureel terug <small>· ${esc((g.constructies || []).filter(c => c.in_pm).map(c => c.naam).join(', '))}</small></span><b style="color:var(--accent)">+ ${euro(t.in_pm)}</b></div>` : ''}
     <div class="geld-rij klik" onclick="geldToggle('variabel')"><span>Budget variabele kosten (${variabel.length}) <small>▾</small></span><b>− ${euro(t.variabel_pm || 0)}</b></div>
     <div class="geld-detail" id="gd-variabel" hidden>${variabel.length ? variabel.map((x, n) => geldRij(x, 'variabel', n)).join('') : '<p class="notitie">Nog geen budgetten. Zet in de Sheet (tab Variabele kosten) wat per maand wisselt: boodschappen, uitjes, kleding, auto…</p>'}</div>
     <div class="geld-rij"><span><b>Blijft over per maand</b> <small>· structureel, zonder incidenteel</small></span><b style="color:${(t.over_pm || 0) >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_pm || 0)}</b></div>
