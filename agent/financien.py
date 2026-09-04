@@ -95,10 +95,6 @@ REGELINGEN: list[tuple[tuple[str, ...], str, str]] = [
     (("kindgebonden",), "Kindgebonden budget",
      "Een inkomensafhankelijke toeslag per kind van de Belastingdienst, maandelijks vooruit als voorschot en "
      "achteraf definitief afgerekend. Bij jullie: {bedrag} per {freq} op {rekening}."),
-    (("teruggaaf", "voorlopige", "ib/pvv"), "Voorlopige teruggaaf inkomstenbelasting",
-     "De Belastingdienst betaalt maandelijks alvast een deel van de verwachte belastingteruggaaf uit, bijvoorbeeld "
-     "door de hypotheekrenteaftrek. Na de aangifte wordt het echte bedrag berekend: te veel ontvangen moet terug, "
-     "te weinig krijg je alsnog. Bij jullie: {bedrag} per {freq} op {rekening}."),
     (("schenking",), "Schenking",
      "Een gift die tot een jaarlijks vrijgesteld bedrag belastingvrij is (ouders → kind kent een hogere "
      "vrijstelling). Bij jullie: {bedrag} per {freq} op {rekening}."),
