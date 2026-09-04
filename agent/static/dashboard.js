@@ -1466,7 +1466,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // ── Geld-tab: financieel register uit de Sheet, achter een pincode (per apparaat één keer) ──
-let GELD = null, GELDPIN = null, VERREKEN = null;
+let GELD = null, GELDPIN = null, VERREKEN = null, GELDWIE = 'alles';
 try { GELDPIN = sessionStorage.getItem('birdy-geld-pin'); } catch(e){}
 function euro(n){ return '€ ' + (Math.round(n || 0)).toLocaleString('nl-NL'); }
 function euro2(n){ return '€ ' + (n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -1495,21 +1495,53 @@ async function renderGeld(){
     <button class="klein" onclick="geldLaad(true).then(renderGeld)">↻ vernieuwen</button>
     <button class="klein" onclick="GELDPIN=null;try{sessionStorage.removeItem('birdy-geld-pin')}catch(e){};renderGeld()">🔒 sluiten</button></div>`;
   html += '<div class="geld-grid">';
-  // 1. vaste lasten + inkomen
-  const lasten = g.vaste_lasten || [];
+  // 1. vaste lasten + inkomen, met filter op "hoort bij" (pot / persoon) en verdeling per rekening
+  const lastenAlle = g.vaste_lasten || [];
+  const pol = g.polissen || [];
+  const wieOpties = ['alles', 'gezamenlijk', ...new Set([...lastenAlle, ...pol].map(x => x.hoort_bij).filter(w => w && w !== 'gezamenlijk'))];
+  if (!wieOpties.includes(GELDWIE)) GELDWIE = 'alles';
+  const kies = x => GELDWIE === 'alles' || x.hoort_bij === GELDWIE;
+  const lasten = lastenAlle.filter(kies), polF = pol.filter(kies);
+  const hypF = GELDWIE === 'alles' || GELDWIE === 'gezamenlijk' ? h.maandlast : 0;
+  const catsF = {}; lasten.forEach(l => { catsF[l.categorie] = (catsF[l.categorie] || 0) + l.per_maand; });
+  const catsL = Object.entries(catsF).sort((a, b) => b[1] - a[1]);
+  const catTotF = catsL.reduce((a, [, n]) => a + n, 0) || 1;
+  const polPm = polF.reduce((a, p) => a + p.per_maand, 0);
+  const vastF = lasten.reduce((a, l) => a + l.per_maand, 0) + polPm + hypF;
+  const perRek = {};
+  lastenAlle.forEach(l => { perRek[l.betaald_van] = (perRek[l.betaald_van] || 0) + l.per_maand; });
+  pol.forEach(p => { perRek[p.betaald_van] = (perRek[p.betaald_van] || 0) + p.per_maand; });
+  (h.delen || []).forEach(d => { const k = d.betaald_van || 'hypotheek (vul “Betaald van” in de Sheet in)'; perRek[k] = (perRek[k] || 0) + d.maandlast; });
+  const perWie = {};
+  lastenAlle.forEach(l => { perWie[l.hoort_bij] = (perWie[l.hoort_bij] || 0) + l.per_maand; });
+  pol.forEach(p => { perWie[p.hoort_bij] = (perWie[p.hoort_bij] || 0) + p.per_maand; });
+  perWie['gezamenlijk'] = (perWie['gezamenlijk'] || 0) + h.maandlast;
   html += `<div class="panel"><div class="kaartkop"><span class="ico">📉</span><h2>Vaste lasten</h2></div>
-    <div class="geld-groot">${euro(t.vast_pm)}<small>vaste lasten per maand</small></div>
-    ${t.inkomen_pm ? `<div class="geld-rij klik" onclick="geldToggle('inkomsten')"><span>Inkomen (${(g.inkomsten || []).length} bronnen) <small>▾</small></span><b>${euro(t.inkomen_pm)}</b></div>
-    <div class="geld-detail" id="gd-inkomsten" hidden>${(g.inkomsten || []).map((i, n) => geldRij(i, 'inkomst', n)).join('')}</div>
-    <div class="geld-rij"><span><b>Blijft over voor de rest</b></span><b style="color:${t.over_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_pm)}</b></div>` : ''}
-    <div class="geld-balk">${cats.map(([c, n], i) => `<i style="width:${(n / catTot * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(c)}"></i>`).join('')}</div>
-    ${cats.map(([c, n], i) => `<div class="geld-rij klik" onclick="geldToggle('cat-${i}')"><span><i class="init" style="background:${kleuren[i % kleuren.length]};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>${esc(c)} <small>▾</small></span><b>${euro(n)}</b></div>
+    <div class="fchips" style="margin:.1rem 0 .5rem">${wieOpties.map(w => `<button class="fchip${GELDWIE === w ? ' actief' : ''}" onclick="GELDWIE='${esc(w)}';renderGeld()">${w === 'gezamenlijk' ? 'de pot' : esc(w)}</button>`).join('')}</div>
+    <div class="geld-groot">${euro(vastF)}<small>per maand${GELDWIE === 'alles' ? '' : ' · ' + (GELDWIE === 'gezamenlijk' ? 'van de pot' : 'van ' + esc(GELDWIE))}</small></div>
+    <div class="geld-balk">${catsL.map(([c, n], i) => `<i style="width:${(n / catTotF * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(c)}"></i>`).join('')}</div>
+    ${catsL.map(([c, n], i) => `<div class="geld-rij klik" onclick="geldToggle('cat-${i}')"><span><i class="init" style="background:${kleuren[i % kleuren.length]};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>${esc(c)} <small>▾</small></span><b>${euro(n)}</b></div>
       <div class="geld-detail" id="gd-cat-${i}" hidden>${lasten.filter(l => l.categorie === c).map((l, n) => geldRij(l, 'last', 'c' + i + '-' + n)).join('')}</div>`).join('')}
-    <div class="geld-rij"><span>Polissen</span><b>${euro(t.polissen_pm)}</b></div>
-    <div class="geld-rij"><span>Hypotheek</span><b>${euro(h.maandlast)}</b></div>
-    ${t.in_pm ? `<div class="geld-rij"><span>Komt terug (constructies)</span><b style="color:var(--accent)">− ${euro(t.in_pm)}</b></div>
-    <div class="geld-rij"><span><b>Netto per maand</b></span><b>${euro(t.netto_pm)}</b></div>` : ''}
-    ${geldUitlegKnop(g, 'vaste lasten', 'Leg in gewone taal uit waar ons geld elke maand naartoe gaat en wat het grootste aandeel is.')}
+    <div class="geld-rij"><span>Polissen</span><b>${euro(polPm)}</b></div>
+    ${hypF ? `<div class="geld-rij"><span>Hypotheek</span><b>${euro(hypF)}</b></div>` : ''}
+    <h4 style="margin-top:.7rem">Wie betaalt, van wie is het</h4>
+    <div class="geld-rij klik" onclick="geldToggle('rek')"><span>Per rekening <small>▾</small></span></div>
+    <div class="geld-detail" id="gd-rek" hidden>${Object.entries(perRek).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div class="geld-rij"><span>${esc(k)}</span><b>${euro(n)}</b></div>`).join('')}</div>
+    <div class="geld-rij klik" onclick="geldToggle('wie')"><span>Per persoon (hoort bij) <small>▾</small></span></div>
+    <div class="geld-detail" id="gd-wie" hidden>${Object.entries(perWie).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div class="geld-rij"><span>${k === 'gezamenlijk' ? 'de pot (gezamenlijk)' : esc(k)}</span><b>${euro(n)}</b></div>`).join('')}</div>
+    ${geldUitlegKnop(g, 'vaste lasten', 'Leg in gewone taal uit waar ons geld elke maand naartoe gaat, wat van de pot is en wat van ieder apart, en wat het grootste aandeel is.')}
+  </div>`;
+  // 1b. inkomen, variabele budgetten en wat er overblijft
+  const variabel = g.variabel || [];
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">💰</span><h2>Inkomen & budget</h2></div>
+    ${t.inkomen_pm ? `<div class="geld-rij klik" onclick="geldToggle('inkomsten')"><span>Inkomen (${(g.inkomsten || []).length} bronnen) <small>▾</small></span><b>${euro(t.inkomen_pm)}</b></div>
+    <div class="geld-detail" id="gd-inkomsten" hidden>${(g.inkomsten || []).map((i, n) => geldRij(i, 'inkomst', n)).join('')}</div>` : '<p class="leeg">nog geen inkomsten ingevuld (tab Inkomsten)</p>'}
+    <div class="geld-rij"><span>Vaste lasten${t.in_pm ? ' (na wat terugkomt)' : ''}</span><b>− ${euro(t.netto_pm)}</b></div>
+    <div class="geld-rij klik" onclick="geldToggle('variabel')"><span>Budget variabele kosten (${variabel.length}) <small>▾</small></span><b>− ${euro(t.variabel_pm || 0)}</b></div>
+    <div class="geld-detail" id="gd-variabel" hidden>${variabel.length ? variabel.map((x, n) => geldRij(x, 'variabel', n)).join('') : '<p class="notitie">Nog geen budgetten. Zet in de Sheet (tab Variabele kosten) wat per maand wisselt: boodschappen, uitjes, kleding, auto…</p>'}</div>
+    <div class="geld-rij"><span><b>Blijft over</b> <small>· na vaste lasten en budgetten</small></span><b style="color:${(t.over_pm || 0) >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_pm || 0)}</b></div>
+    ${!variabel.length ? '<p class="notitie">Zonder budgetten voor variabele kosten is "blijft over" te rooskleurig.</p>' : ''}
+    ${geldUitlegKnop(g, 'budget', 'Leg in gewone taal uit wat er van ons inkomen overblijft na de vaste lasten en de budgetten, en waar we op kunnen sturen.')}
   </div>`;
   // 2. hypotheek
   const rentePct = h.maandlast ? Math.round(h.rente / h.maandlast * 100) : 0;
@@ -1572,19 +1604,19 @@ function geldToggle(id){ const d = document.getElementById('gd-' + id); if (d) d
 function geldRij(x, soort, n){
   const id = `${soort}-${n}`;
   const naam = x.naam || x.deel || '';
-  const bedragTekst = soort === 'hypotheek' ? euro2(x.maandlast) : euro2(x.per_maand) + (x.frequentie && x.frequentie !== 'maand' ? `<small> /mnd (${euro2(x.bedrag)} per ${esc(x.frequentie)})</small>` : '');
+  const bedragTekst = soort === 'hypotheek' ? euro2(x.maandlast) : euro2(x.per_maand);
   const sub = soort === 'inkomst' ? `${esc(x.komt_binnen_op)} · hoort bij ${esc(x.hoort_bij)}`
             : soort === 'hypotheek' ? `${esc(x.verstrekker || '')}${x.vorm ? ' · ' + esc(x.vorm) : ''}${x.rente_pct ? ' · ' + x.rente_pct + '%' : ''}`
-            : `${esc(x.betaald_van)}${x.hoort_bij && x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}${soort === 'polis' && x.verzekeraar ? ' · ' + esc(x.verzekeraar) : ''}`;
+            : `${esc(x.betaald_van)}${x.hoort_bij && x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}${soort === 'polis' && x.verzekeraar ? ' · ' + esc(x.verzekeraar) : ''}${x.frequentie && x.frequentie !== 'maand' ? ' · ' + euro2(x.bedrag) + ' per ' + esc(x.frequentie) : ''}`;
   const badge = (x.dagen !== null && x.dagen !== undefined) ? `<small style="${x.dagen < 45 ? 'color:var(--amber)' : ''}">${x.dagen < 0 ? 'verlopen' : 'tot ' + esc(x.einddatum)}</small>` : '';
   const det = [];
   const rij = (k, v) => v !== undefined && v !== null && v !== '' && det.push(`<div class="geld-rij"><span>${k}</span><b style="font-weight:500">${v}</b></div>`);
   if (soort === 'hypotheek'){
-    rij('Verstrekker', esc(x.verstrekker)); rij('Maandlast', euro2(x.maandlast));
+    rij('Verstrekker', esc(x.verstrekker)); rij('Maandlast', euro2(x.maandlast)); rij('Betaald van', esc(x.betaald_van));
     if (x.bekend){ rij('Waarvan rente', euro2(x.rente)); rij('Waarvan aflossing', euro2(x.aflossing)); rij('Restschuld', euro(x.restschuld)); rij('Hoofdsom', x.hoofdsom ? euro(x.hoofdsom) : ''); rij('Rente', x.rente_pct ? x.rente_pct + '%' : ''); rij('Rente vast tot', esc(x.rentevast_tot)); rij('Vorm', esc(x.vorm)); rij('Loopt tot', esc(x.einddatum)); }
     else det.push('<p class="notitie">Vul hoofdsom, restschuld, rente en rentevaste periode in de Sheet in voor de details.</p>');
   } else {
-    rij('Bedrag', `${euro2(x.bedrag !== undefined ? x.bedrag : x.premie)} per ${esc(x.frequentie || 'maand')}`);
+    rij(soort === 'variabel' ? 'Budget' : 'Bedrag', `${euro2(x.bedrag !== undefined ? x.bedrag : x.premie)} per ${esc(x.frequentie || 'maand')}`);
     if (x.frequentie && x.frequentie !== 'maand') rij('Per maand', euro2(x.per_maand));
     rij(soort === 'inkomst' ? 'Komt binnen op' : 'Betaald van', esc(soort === 'inkomst' ? x.komt_binnen_op : x.betaald_van));
     rij('Hoort bij', esc(x.hoort_bij));

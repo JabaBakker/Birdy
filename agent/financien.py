@@ -18,6 +18,8 @@ Tabbladen en kolommen (kopregel = rij 1; hoofdletters/spaties maken niet uit):
   Hypotheek    : Deel · Verstrekker · Hoofdsom · Restschuld · Rente % · Rentevast tot ·
                  Aflossingsvorm · Maandlast · Waarvan rente · Waarvan aflossing · Einddatum ·
                  Document · Notitie
+  Variabele kosten: Naam · Budget · Frequentie · Betaald van · Hoort bij · Herkenning · Notitie
+                 ← budgetten voor wat elke maand wisselt (boodschappen, uitjes, kleding, auto)
   Geldstromen  : Naam · Richting (in/uit) · Bedrag · Frequentie · Van · Naar · Hoort bij ·
                  Categorie · Uitleg      ← voor constructies zoals een lening bij familie
   Uitleg       : Onderwerp · Tekst · Bijgewerkt   ← door Birdy geschreven uitleg in gewone taal
@@ -54,7 +56,8 @@ TABS: dict[str, list[str]] = {
                  "Betaald van", "Hoort bij", "Einddatum", "Opzegtermijn", "Herkenning", "Document", "Notitie"],
     "Hypotheek": ["Deel", "Verstrekker", "Hoofdsom", "Restschuld", "Rente %", "Rentevast tot",
                   "Aflossingsvorm", "Maandlast", "Waarvan rente", "Waarvan aflossing", "Einddatum",
-                  "Document", "Notitie"],
+                  "Betaald van", "Document", "Notitie"],
+    "Variabele kosten": ["Naam", "Budget", "Frequentie", "Betaald van", "Hoort bij", "Herkenning", "Notitie"],
     "Geldstromen": ["Naam", "Richting", "Bedrag", "Frequentie", "Van", "Naar", "Hoort bij",
                     "Categorie", "Uitleg"],
     "Uitleg": ["Onderwerp", "Tekst", "Bijgewerkt"],
@@ -73,6 +76,7 @@ VOORBEELDEN: dict[str, list[list]] = {
     "Hypotheek": [
         ["Deel 1 (voorbeeld)", "—", 300000, 250000, 3.1, "01-07-2030", "annuïteit", 1450, 640, 810, "01-07-2050", "", ""],
     ],
+    "Variabele kosten": [["Boodschappen (voorbeeld)", 600, "maand", "gezamenlijk", "gezamenlijk", "", "schatting"]],
     "Geldstromen": [
         ["Lening vader", "uit", 600, "maand", "gezamenlijk", "vader", "gezamenlijk", "Familie", "Maandelijkse betaling aan vader voor de lening."],
         ["Lening vader", "in", 1800, "kwartaal", "vader", "gezamenlijk", "gezamenlijk", "Familie", "Elk kwartaal komt er 1800 terug; netto per maand dus 0."],
@@ -350,6 +354,15 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "herkenning": str(r.get("Herkenning") or ""),
             "document": str(r.get("Document") or ""), "notitie": str(r.get("Notitie") or ""),
         })
+    variabel = []
+    for r in lees("Variabele kosten"):
+        variabel.append({
+            "naam": str(r.get("Naam")), "bedrag": _bedrag(r.get("Budget")), "frequentie": str(r.get("Frequentie") or "maand"),
+            "per_maand": per_maand(r.get("Budget"), r.get("Frequentie")),
+            "betaald_van": _wie(r.get("Betaald van")), "betaler": eigenaar(r.get("Betaald van")),
+            "hoort_bij": _wie(r.get("Hoort bij")), "herkenning": str(r.get("Herkenning") or ""),
+            "notitie": str(r.get("Notitie") or ""),
+        })
     per_cat: dict[str, float] = {}
     for l in lasten:
         per_cat[l["categorie"]] = round(per_cat.get(l["categorie"], 0) + l["per_maand"], 2)
@@ -391,6 +404,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "rentevast_tot": rv.isoformat() if rv else "", "rentevast_dagen": (rv - vandaag).days if rv else None,
             "vorm": str(r.get("Aflossingsvorm") or ""), "maandlast": maandlast,
             "rente": rente, "aflossing": aflossing,
+            "betaald_van": _wie(r.get("Betaald van")) if r.get("Betaald van") else "",
             "bekend": bool(rest or pct or rente),  # zonder restschuld/rente is er niets te verdelen
             "einddatum": eind.isoformat() if eind else "", "document": str(r.get("Document") or ""),
             "notitie": str(r.get("Notitie") or ""),
@@ -498,6 +512,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
                         + hyp["maandlast"] + sum(c["uit_pm"] for c in echte_constructies), 2)
     totaal_in = round(sum(c["in_pm"] for c in echte_constructies), 2)
     inkomen_pm = round(sum(i["per_maand"] for i in inkomsten), 2)
+    variabel_pm = round(sum(x["per_maand"] for x in variabel), 2)
 
     return {
         "beschikbaar": True, "link": link, "vandaag": vandaag.isoformat(),
@@ -507,12 +522,14 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
         "hypotheek": hyp,
         "rekeningen": rekeningen,
         "inkomsten": sorted(inkomsten, key=lambda i: -i["per_maand"]),
+        "variabel": sorted(variabel, key=lambda x: -x["per_maand"]),
         "constructies": echte_constructies,
         "inleg": inleg,
         "verrekening": {"personen": personen, "saldo": saldo, "regels": regels, "tekst": verreken_tekst,
                         "verdeling": verdeling},
         "totalen": {"vast_pm": totaal_vast, "in_pm": totaal_in, "netto_pm": round(totaal_vast - totaal_in, 2),
-                    "inkomen_pm": inkomen_pm, "over_pm": round(inkomen_pm - (totaal_vast - totaal_in), 2),
+                    "inkomen_pm": inkomen_pm, "variabel_pm": variabel_pm,
+                    "over_pm": round(inkomen_pm - (totaal_vast - totaal_in) - variabel_pm, 2),
                     "lasten_pm": round(sum(l["per_maand"] for l in lasten), 2),
                     "polissen_pm": round(sum(p["per_maand"] for p in polissen), 2)},
         "uitleg": uitleg,
@@ -555,7 +572,7 @@ def toon() -> str:
               f"polissen {r['totalen']['polissen_pm']:,.2f} · hypotheek {r['hypotheek']['maandlast']:,.2f}) · "
               f"terugkomend € {r['totalen']['in_pm']:,.2f}/mnd → netto € {r['totalen']['netto_pm']:,.2f}/mnd", ""]
     if r["inkomsten"]:
-        regels.append(f"INKOMSTEN € {r['totalen']['inkomen_pm']:,.2f}/mnd → blijft over € {r['totalen']['over_pm']:,.2f}/mnd")
+        regels.append(f"INKOMSTEN € {r['totalen']['inkomen_pm']:,.2f}/mnd → na vaste lasten en budgetten blijft over € {r['totalen']['over_pm']:,.2f}/mnd")
         for i in r["inkomsten"]:
             regels.append(f"• {i['naam']} — € {i['bedrag']:,.2f} per {i['frequentie']} (= {i['per_maand']:,.2f}/mnd) · komt binnen op {i['komt_binnen_op']} · hoort bij {i['hoort_bij']}")
     regels.append("VASTE LASTEN")
@@ -564,6 +581,10 @@ def toon() -> str:
                       f"betaald van {l['betaald_van']} · hoort bij {l['hoort_bij']}"
                       + (f" · einddatum {l['einddatum']}" if l["einddatum"] else "")
                       + (f" · opzegtermijn {l['opzegtermijn']}" if l["opzegtermijn"] else ""))
+    if r["variabel"]:
+        regels.append(f"VARIABELE KOSTEN (budget) € {r['totalen']['variabel_pm']:,.2f}/mnd")
+        for x in r["variabel"]:
+            regels.append(f"• {x['naam']} — € {x['per_maand']:,.2f}/mnd · betaald van {x['betaald_van']} · hoort bij {x['hoort_bij']}")
     regels.append("POLISSEN")
     for p in r["polissen"]:
         regels.append(f"• {p['naam']} ({p['verzekeraar']}) — {p['dekking']} · premie € {p['premie']:,.2f} per {p['frequentie']} · "

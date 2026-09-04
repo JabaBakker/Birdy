@@ -394,8 +394,12 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         wb["Hypotheek"].append(["Deel 1", "ING", 300000, 250000, 3.0, "01-12-2026", "annuïteit", 1450, "", "", "", "", ""])
         wb["Geldstromen"].append(["Lening vader", "uit", 600, "maand", "gezamenlijk", "vader", "gezamenlijk", "Familie", "betaling"])
         wb["Geldstromen"].append(["Lening vader", "in", 1800, "kwartaal", "vader", "gezamenlijk", "gezamenlijk", "Familie", "komt terug"])
+        wb["Variabele kosten"].append(["Boodschappen", 600, "maand", "gezamenlijk", "gezamenlijk", "", ""])
+        wb["Inkomsten"].append(["Salaris Jaap", 5000, "maand", "Jaap", "Jaap", "", "", ""])
         r = financien.register(wb, vandaag=date(2026, 9, 2))
         self.assertTrue(r["beschikbaar"])
+        self.assertEqual(r["totalen"]["variabel_pm"], 600.0)
+        self.assertEqual(r["totalen"]["over_pm"], round(5000 - (r["totalen"]["vast_pm"] - r["totalen"]["in_pm"]) - 600, 2))
         pm = {l["naam"]: l["per_maand"] for l in r["vaste_lasten"]}
         self.assertEqual(pm["Netflix"], 15.99); self.assertEqual(pm["Sportschool Yvette"], 50.0)
         self.assertEqual(r["per_categorie"]["Wonen"], 180.0)
