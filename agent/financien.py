@@ -104,6 +104,11 @@ WOORDENLIJST: list[tuple[str, str]] = [
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+def eur(n: float) -> str:
+    """Nederlandse notatie zonder decimalen: 1.142 · 78"""
+    return f"{n:,.0f}".replace(",", ".")
+
+
 def _bedrag(v) -> float:
     if v is None or v == "":
         return 0.0
@@ -431,9 +436,9 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
     delen_tekst = []
     for p, v in saldo.items():
         if v > 0.5:
-            delen_tekst.append(f"de pot is {p} € {v:,.0f} per maand schuldig")
+            delen_tekst.append(f"de pot is {p} € {eur(v)} per maand schuldig")
         elif v < -0.5:
-            delen_tekst.append(f"{p} is de pot € {-v:,.0f} per maand schuldig")
+            delen_tekst.append(f"{p} is de pot € {eur(-v)} per maand schuldig")
     verreken_tekst = "; ".join(delen_tekst) if delen_tekst else "structureel in balans"
     verdeling = {}
 
