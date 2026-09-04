@@ -388,21 +388,30 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         for tab, kolommen in financien.TABS.items():
             wb.create_sheet(tab).append(kolommen)
         wb["Vaste lasten"].append(["Energie", "Wonen", 180, "maand", "gezamenlijk", "gezamenlijk", 1, "", "", "", ""])
-        wb["Vaste lasten"].append(["Netflix", "Abonnementen", "€ 15,99", "maand", "Jaap", "gezamenlijk", 12, "1 maand", "20-09-2026", "", ""])
+        wb["Vaste lasten"].append(["Netflix", "Abonnementen", "€ 15,99", "maand", "Jaap", "gezamenlijk", 12, "1 maand", "", "20-09-2026", "", "", "", "", ""])
         wb["Vaste lasten"].append(["Sportschool Yvette", "Sport", 600, "jaar", "gezamenlijk", "Yvette", "", "", "", "", ""])
-        wb["Polissen"].append(["Autoverzekering", "ANWB", "WA+", 62, "maand", 150, "Jaap", "gezamenlijk", "31-12-2026", "1 maand", "", ""])
+        wb["Polissen"].append(["Autoverzekering", "ANWB", "WA+", 62, "maand", 150, "Jaap", "gezamenlijk", "", "31-12-2026", "", "1 maand", "", "", "", ""])
         wb["Hypotheek"].append(["Deel 1", "ING", 300000, 250000, 3.0, "01-12-2026", "annuïteit", 1450, "", "", "", "", ""])
         wb["Geldstromen"].append(["Lening vader", "uit", 600, "maand", "gezamenlijk", "vader", "gezamenlijk", "Familie", "betaling"])
         wb["Geldstromen"].append(["Lening vader", "in", 1800, "kwartaal", "vader", "gezamenlijk", "gezamenlijk", "Familie", "komt terug"])
         wb["Variabele kosten"].append(["Boodschappen", 600, "maand", "gezamenlijk", "gezamenlijk", "", ""])
+        wb["Incidenteel"].append(["Vakantiegeld", "inkomst", 3000, "mei", "ja", "Jaap", "Jaap", ""])
+        wb["Incidenteel"].append(["Vakantie", "uitgave", 3600, "juli", "ja", "Jaap", "gezamenlijk", ""])
+        wb["Incidenteel"].append(["Aanslag", "uitgave", 500, "feb", "nee", "Jaap", "Jaap", ""])
+        wb["Vaste lasten"].append(["Efteling", "Uitjes", 33.50, "2 maanden", "gezamenlijk", "gezamenlijk", "", "", "", "", "", "", "", "", ""])
+        wb["Vaste lasten"].append(["Energie", "Wonen", 254, "maand", "Jaap", "gezamenlijk", "", "", "", "", "01-10-2026", "", "inleg", "", ""])
         wb["Inkomsten"].append(["Salaris Jaap", 5000, "maand", "Jaap", "Jaap", "", "", ""])
         r = financien.register(wb, vandaag=date(2026, 9, 2))
         self.assertTrue(r["beschikbaar"])
         self.assertEqual(r["totalen"]["variabel_pm"], 600.0)
+        self.assertEqual(r["totalen"]["reservering_pm"], 50.0)  # (3600 − 3000) / 12; onvoorspelbaar telt niet
+        self.assertEqual({l["naam"]: l["per_maand"] for l in r["vaste_lasten"]}["Efteling"], 16.75)
+        self.assertEqual([x["wat"] for x in r["via_inleg"]], ["Energie"])  # zit in de inleg → niet in verrekening
+        self.assertTrue(any("Energie" in t and "overstap" in t for t in [s["tekst"] for s in r["signalen"]]))
         self.assertEqual(r["totalen"]["over_pm"], round(5000 - (r["totalen"]["vast_pm"] - r["totalen"]["in_pm"]) - 600, 2))
         pm = {l["naam"]: l["per_maand"] for l in r["vaste_lasten"]}
         self.assertEqual(pm["Netflix"], 15.99); self.assertEqual(pm["Sportschool Yvette"], 50.0)
-        self.assertEqual(r["per_categorie"]["Wonen"], 180.0)
+        self.assertEqual(r["per_categorie"]["Wonen"], 434.0)  # energie 180 + 254
         c = r["constructies"][0]
         self.assertEqual((c["uit_pm"], c["in_pm"], c["netto_pm"]), (600.0, 600.0, 0.0))
         h = r["hypotheek"]; self.assertEqual(h["rente"], 625.0); self.assertEqual(h["aflossing"], 825.0)
@@ -441,9 +450,21 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(all(p["verrekend"] for p in vr["posten"])); self.assertEqual(len(vr["afrekeningen"]), 1)
                 async with s.post("http://127.0.0.1:18813/api/verreken", json={"actie": "afrekenen"}, headers=H) as r:
                     self.assertEqual(r.status, 400)  # niets open
+                async with s.post("http://127.0.0.1:18813/api/besparingen", json={"actie": "toevoegen", "voorstel": "Wellis stoppen", "per_maand": "249"}, headers=H) as r:
+                    bid = (await r.json())["items"][-1]["id"]
+                async with s.post("http://127.0.0.1:18813/api/besparingen", json={"actie": "status", "id": bid, "status": "gedaan"}, headers=H) as r:
+                    self.assertEqual((await r.json())["items"][-1]["status"], "gedaan")
+                async with s.post("http://127.0.0.1:18813/api/besparingen", json={"actie": "verwijderen", "id": bid}, headers=H) as r:
+                    self.assertEqual((await r.json())["items"], [])
+                fd = aiohttp.FormData(); fd.add_field("bestand", b"%PDF-1.4 test", filename="polis.pdf"); fd.add_field("hint", "autoverzekering")
+                async with s.post("http://127.0.0.1:18813/api/upload", data=fd, headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 200); up = await r.json()
+                    self.assertEqual(up["reply"], "OK-ANTWOORD"); self.assertTrue(up["pad"].startswith("inbox/docs/"))
+                    self.assertTrue((cfg.workspace / up["pad"]).exists()); (cfg.workspace / up["pad"]).unlink()
         finally:
             await d.stop()
             (cfg.workspace / "memory" / "verrekenen.json").unlink(missing_ok=True)
+            (cfg.workspace / "memory" / "besparingen.json").unlink(missing_ok=True)
 
     def test_dubbelingen(self):
         from agent.signalen import dubbelingen

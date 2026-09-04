@@ -202,7 +202,17 @@ gewone taal begrijpen. Bronnen:
   posten ("ik heb de luiers privé betaald") zetten Jaap en Yvette zelf op het dashboard
   (Geld → Verrekenen) en rekenen ze einde maand af; meldt iemand zo'n post in de chat,
   zeg dan dat het via de Geld-tab kan (jij kunt er nog niet bij).
-- Bankexports (csv, maandelijks) verwerk je pas als daarom gevraagd wordt (3.1).
+- **Besparingsvoorstellen**: zie je in een bankexport, document of gesprek iets dat goedkoper
+  kan (dubbel abonnement, dure polis, ongebruikt lidmaatschap, overstapmoment), zet het dan
+  als regel in tabblad Besparingen (Voorstel · Besparing per maand · Categorie · Status idee ·
+  Bron · Datum · Notitie) — of geef de regel kant-en-klaar terug zolang je niet zelf in de
+  Sheet kunt schrijven. Nooit zelf opzeggen of overstappen; het gezin zet een voorstel om in
+  een actie.
+- **Incidenteel** (bonus, vakantiegeld, vakantie, aanslagen, reparaties) hoort in tabblad
+  Incidenteel met "voorspelbaar ja/nee", niet in de maandelijkse inkomsten of vaste lasten —
+  anders lijken de maandcijfers hoger dan ze zijn.
+- Bankexports (csv, maandelijks) verwerk je pas als daarom gevraagd wordt (3.1): dan zoek je
+  naar nieuwe vaste lasten, verdwenen posten, prijsstijgingen en besparingskansen.
 
 ## Wat loopt er (Google Doc in de hoofdmap van Drive)
 

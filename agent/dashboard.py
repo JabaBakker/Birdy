@@ -84,6 +84,9 @@ class Dashboard:
         app.router.add_get("/api/geld", self.geld)
         app.router.add_get("/api/verreken", self.verreken_get)
         app.router.add_post("/api/verreken", self.verreken_post)
+        app.router.add_get("/api/besparingen", self.besparingen_get)
+        app.router.add_post("/api/besparingen", self.besparingen_post)
+        app.router.add_post("/api/upload", self.upload)
         app.router.add_get("/api/plan", self.plan_get)
         app.router.add_post("/api/plan", self.plan_post)
         app.router.add_get("/api/overview", self.overview)
@@ -253,6 +256,115 @@ class Dashboard:
             self._verreken_schrijf(d)
             return web.json_response({"ok": True, "afrekening": afrekening})
         return web.json_response({"error": "onbekende actie"}, status=400)
+
+    # -- besparingsvoorstellen die via het dashboard zijn toegevoegd (naast de Sheet) ----
+
+    def _besparingen_pad(self) -> Path:
+        return self.cfg.workspace / "memory" / "besparingen.json"
+
+    def _besparingen_lees(self) -> list[dict]:
+        try:
+            d = json.loads(self._besparingen_pad().read_text())
+            return list(d) if isinstance(d, list) else []
+        except (OSError, ValueError):
+            return []
+
+    async def besparingen_get(self, request: web.Request) -> web.Response:
+        fout = self._geld_ok(request)
+        if fout:
+            return fout
+        return web.json_response({"items": self._besparingen_lees()}, headers={"Cache-Control": "no-store"})
+
+    async def besparingen_post(self, request: web.Request) -> web.Response:
+        """{actie:'toevoegen', voorstel, per_maand?, categorie?, notitie?, bron?} ·
+        {actie:'status', id, status} · {actie:'verwijderen', id}"""
+        fout = self._geld_ok(request)
+        if fout:
+            return fout
+        try:
+            body = await request.json()
+            assert isinstance(body, dict)
+        except Exception:
+            return web.json_response({"error": "geen geldige json"}, status=400)
+        items = self._besparingen_lees()
+        actie = str(body.get("actie", ""))
+        if actie == "toevoegen":
+            voorstel = str(body.get("voorstel", "")).strip()[:160]
+            if not voorstel:
+                return web.json_response({"error": "voorstel ontbreekt"}, status=400)
+            try:
+                pm = round(float(str(body.get("per_maand", 0) or 0).replace(",", ".")), 2)
+            except ValueError:
+                pm = 0.0
+            item = {"id": f"{int(time.time() * 1000)}", "voorstel": voorstel, "per_maand": pm,
+                    "categorie": str(body.get("categorie", "")).strip()[:40], "status": "idee",
+                    "bron": str(body.get("bron", "dashboard")).strip()[:40], "datum": date.today().isoformat(),
+                    "notitie": str(body.get("notitie", "")).strip()[:300], "uit": "dashboard"}
+            items.append(item)
+        elif actie == "status":
+            for it in items:
+                if it["id"] == str(body.get("id", "")):
+                    it["status"] = str(body.get("status", "idee")).strip().lower()[:20]
+        elif actie == "verwijderen":
+            items = [it for it in items if it["id"] != str(body.get("id", ""))]
+        else:
+            return web.json_response({"error": "onbekende actie"}, status=400)
+        pad = self._besparingen_pad()
+        pad.parent.mkdir(parents=True, exist_ok=True)
+        tmp = pad.with_suffix(".tmp")
+        tmp.write_text(json.dumps(items, ensure_ascii=False, indent=1))
+        tmp.replace(pad)
+        return web.json_response({"ok": True, "items": items})
+
+    # -- document uploaden vanaf het dashboard (bijv. een polis) → Birdy archiveert ------
+
+    async def upload(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        reader = await request.multipart()
+        bestand, naam, hint = None, "", ""
+        while True:
+            deel = await reader.next()
+            if deel is None:
+                break
+            if deel.name == "hint":
+                hint = (await deel.text())[:300]
+            elif deel.name == "bestand":
+                naam = Path(deel.filename or "document").name[:120]
+                data = bytearray()
+                while True:
+                    chunk = await deel.read_chunk(65536)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if len(data) > 15 * 1024 * 1024:
+                        return web.json_response({"error": "bestand groter dan 15 MB"}, status=413)
+                bestand = bytes(data)
+        if not bestand or not naam:
+            return web.json_response({"error": "geen bestand"}, status=400)
+        map_ = self.cfg.workspace / "inbox" / "docs"
+        map_.mkdir(parents=True, exist_ok=True)
+        veilig = "".join(c if c.isalnum() or c in "._-" else "_" for c in naam)
+        pad = map_ / f"{datetime.now():%Y%m%d-%H%M%S}_{veilig}"
+        pad.write_bytes(bestand)
+        rel = str(pad.relative_to(self.cfg.workspace))
+        tekst = (f"Via het dashboard is een document geüpload: {rel}."
+                 + (f" Toelichting: {hint}." if hint else "")
+                 + " Lees het, archiveer het op de juiste plek in Drive (financiële stukken in "
+                   "30 Financiën/<map>), en geef als het om een polis, contract of abonnement gaat de "
+                   "kant-en-klare regel voor het register terug (tabblad + kolommen).")
+        async with self.work_lock:
+            reply = await self.brain.run("process_message.md", "dashboard-upload",
+                                         sender="het dashboard", text=tekst, photo=rel)
+        reply = reply or "Hmm, daar ging iets mis bij het verwerken van het document."
+        for adapter in self.adapters:
+            if adapter is not self:
+                try:
+                    await adapter.broadcast(f"📎 Document via het dashboard ({veilig})\n{reply}", kind="chat")
+                except Exception:
+                    log.exception("echo van upload mislukt")
+        self._invalidate()
+        return web.json_response({"ok": True, "reply": reply, "pad": rel})
 
     # -- gedeelde kinderplanning (zelfde timer op tablet én telefoon) -------
 
