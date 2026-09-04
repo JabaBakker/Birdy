@@ -492,3 +492,8 @@
 .geld-wl details[open] summary::before { content:"⌄ "; }
 .geld-wl p { color:var(--dim); font-size:.9rem; margin:.3rem 0 .2rem 1rem; line-height:1.45; }
 .geld-saldo { font-size:1.05rem; font-weight:650; margin:.3rem 0 .5rem; }
+.vr-form { display:grid; grid-template-columns:1fr 1fr; gap:.4rem; margin:.5rem 0 .7rem; }
+.vr-form input, .vr-form select { background:var(--bg); border:1px solid #333a41; border-radius:8px; color:var(--ink);
+                                  padding:.45rem .6rem; font-size:.95rem; font-family:inherit; min-width:0; }
+.vr-form #vrOms, .vr-form #vrRichting { grid-column:1 / -1; }
+.vr-form .aknop { grid-column:1 / -1; margin-top:0; }

@@ -193,8 +193,15 @@ gewone taal begrijpen. Bronnen:
   cijfers uit het register, in maximaal ±8 regels, zonder jargon, met een concreet
   voorbeeld ("van jullie 1.450 per maand is 640 rente en 810 aflossing"). Geen advies over
   producten of beleggingen; wel signaleren wat opgezegd of vergeleken kan worden.
-- **Constructies** (bijv. lening bij familie: 600 per maand betalen, 1.800 per kwartaal
-  terug) staan in tabblad Geldstromen met een Uitleg-kolom; gebruik die uitleg letterlijk.
+- **Constructies** (bijv. de familiehypotheek: 632,41 per maand aan de BV van vader, per
+  kwartaal 1.897,23 terug als schenking, netto nul) staan in tabblad Geldstromen met een
+  Uitleg-kolom; gebruik die uitleg letterlijk.
+- **Verrekenen werkt tegenover de pot** (de gezamenlijke rekening): wie privé iets voor de
+  pot betaalt, krijgt dat terug; wie privé iets van de pot ontvangt (zoals een toeslag) of
+  door de pot laat betalen, is dat de pot schuldig. De inleg-afspraak telt niet mee. Losse
+  posten ("ik heb de luiers privé betaald") zetten Jaap en Yvette zelf op het dashboard
+  (Geld → Verrekenen) en rekenen ze einde maand af; meldt iemand zo'n post in de chat,
+  zeg dan dat het via de Geld-tab kan (jij kunt er nog niet bij).
 - Bankexports (csv, maandelijks) verwerk je pas als daarom gevraagd wordt (3.1).
 
 ## Wat loopt er (Google Doc in de hoofdmap van Drive)

@@ -229,6 +229,8 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(pj["plan"]["gekozen"], [0]); self.assertEqual(pj["bijgewerkt"], ts)
                 async with s.get("http://127.0.0.1:18811/api/geld", headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 403)  # geen pincode ingesteld in de test
+                async with s.get("http://127.0.0.1:18811/api/verreken", headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 403)  # zonder pincode
                 async with s.get("http://127.0.0.1:18811/manifest.webmanifest") as r:
                     self.assertEqual(r.status, 200)
                 async with s.get("http://127.0.0.1:18811/sw.js") as r:
@@ -400,15 +402,44 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         c = r["constructies"][0]
         self.assertEqual((c["uit_pm"], c["in_pm"], c["netto_pm"]), (600.0, 600.0, 0.0))
         h = r["hypotheek"]; self.assertEqual(h["rente"], 625.0); self.assertEqual(h["aflossing"], 825.0)
-        # verrekening: Jaap betaalde 15.99 + 62 gezamenlijk (helft terug), Yvette kreeg 50/mnd van gezamenlijk
+        # verrekening (pot-model): Jaap betaalde 15.99 + 62 voor de pot → pot is Jaap 77.99 schuldig;
+        # de pot betaalde Yvettes sportschool (50) → Yvette is de pot 50 schuldig
         v = r["verrekening"]; self.assertEqual(v["personen"], ["Jaap", "Yvette"])
-        self.assertAlmostEqual(v["saldo"]["Jaap"], 39.0, places=1); self.assertAlmostEqual(v["saldo"]["Yvette"], -89.0, places=1)
-        self.assertIn("Yvette moet Jaap", v["tekst"])
+        self.assertAlmostEqual(v["saldo"]["Jaap"], 77.99, places=2); self.assertAlmostEqual(v["saldo"]["Yvette"], -50.0, places=2)
+        self.assertIn("de pot is Jaap € 78", v["tekst"]); self.assertIn("Yvette is de pot € 50", v["tekst"])
         teksten = [s["tekst"] for s in r["signalen"]]
         self.assertTrue(any("Netflix" in t and "op te zeggen" in t for t in teksten))  # 20-09 − 1 maand ≈ nu
         self.assertTrue(any("Rentevaste periode" in t for t in teksten))          # 01-12 binnen 180 dagen
         self.assertFalse(any("Autoverzekering" in t for t in teksten))           # 31-12 − 1 maand > 21 dagen
         self.assertEqual(r["totalen"]["in_pm"], 600.0)
+
+    async def test_verrekenen(self):
+        from agent.dashboard import Dashboard
+        cfg = Config(dashboard_token="geheim", dashboard_port=18813, dashboard_geld_pin="1234")
+        d = Dashboard(cfg, FakeBrain(), asyncio.Lock(), [])
+        (cfg.workspace / "memory" / "verrekenen.json").unlink(missing_ok=True)
+        await d.start()
+        try:
+            import aiohttp
+            H = {"X-Dashboard-Key": "geheim", "X-Geld-Pin": "1234"}
+            async with aiohttp.ClientSession() as s:
+                async with s.post("http://127.0.0.1:18813/api/verreken", json={"actie": "toevoegen", "wie": "Jaap", "bedrag": "12,50", "omschrijving": "luiers", "richting": "voor_pot"}, headers=H) as r:
+                    self.assertEqual(r.status, 200)
+                async with s.post("http://127.0.0.1:18813/api/verreken", json={"actie": "toevoegen", "wie": "Yvette", "bedrag": 30, "omschrijving": "kapper", "richting": "uit_pot"}, headers=H) as r:
+                    self.assertEqual(r.status, 200)
+                async with s.post("http://127.0.0.1:18813/api/verreken", json={"actie": "toevoegen", "wie": "Jaap", "bedrag": 0}, headers=H) as r:
+                    self.assertEqual(r.status, 400)
+                async with s.post("http://127.0.0.1:18813/api/verreken", json={"actie": "afrekenen"}, headers=H) as r:
+                    a = (await r.json())["afrekening"]
+                    self.assertEqual(a["saldo"], {"Jaap": 12.5, "Yvette": -30.0}); self.assertIn("pot → Jaap: € 12.50", a["tekst"])
+                async with s.get("http://127.0.0.1:18813/api/verreken", headers=H) as r:
+                    vr = await r.json()
+                    self.assertTrue(all(p["verrekend"] for p in vr["posten"])); self.assertEqual(len(vr["afrekeningen"]), 1)
+                async with s.post("http://127.0.0.1:18813/api/verreken", json={"actie": "afrekenen"}, headers=H) as r:
+                    self.assertEqual(r.status, 400)  # niets open
+        finally:
+            await d.stop()
+            (cfg.workspace / "memory" / "verrekenen.json").unlink(missing_ok=True)
 
     def test_dubbelingen(self):
         from agent.signalen import dubbelingen

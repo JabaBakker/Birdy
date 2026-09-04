@@ -9,8 +9,10 @@ CLI voor het brein:
     python /app/agent/financien.py maak     de Sheet (met kopregels en voorbeelden) aanmaken
 
 Tabbladen en kolommen (kopregel = rij 1; hoofdletters/spaties maken niet uit):
+  Rekeningen   : Naam · IBAN · Van · Doel                ← "Betaald van" verwijst naar deze namen
+  Inkomsten    : Naam · Bedrag · Frequentie · Komt binnen op · Hoort bij · Herkenning · Notitie
   Vaste lasten : Naam · Categorie · Bedrag · Frequentie · Betaald van · Hoort bij · Betaaldag ·
-                 Opzegtermijn · Einddatum · Document · Notitie
+                 Opzegtermijn · Einddatum · Herkenning · Document · Notitie
   Polissen     : Verzekering · Verzekeraar · Dekking · Premie · Frequentie · Eigen risico ·
                  Betaald van · Hoort bij · Einddatum · Opzegtermijn · Document · Notitie
   Hypotheek    : Deel · Verstrekker · Hoofdsom · Restschuld · Rente % · Rentevast tot ·
@@ -20,7 +22,10 @@ Tabbladen en kolommen (kopregel = rij 1; hoofdletters/spaties maken niet uit):
                  Categorie · Uitleg      ← voor constructies zoals een lening bij familie
   Uitleg       : Onderwerp · Tekst · Bijgewerkt   ← door Birdy geschreven uitleg in gewone taal
 Frequentie: maand · kwartaal · halfjaar · jaar · week · 2 weken · eenmalig.
-Betaald van / Hoort bij: een naam uit DASHBOARD_PERSONEN, of "gezamenlijk".
+Betaald van / Komt binnen op: een rekening uit het tabblad Rekeningen (of een persoonsnaam);
+Hoort bij: een persoon of "gezamenlijk" (de pot). Verrekenen gebeurt tegenover de pot: wie privé
+iets voor de pot betaalt krijgt dat terug; wie privé iets van de pot ontvangt, is dat de pot schuldig.
+"Herkenning" = tegenrekening (IBAN) of trefwoord, voor het automatisch matchen van bankexports (3.1).
 """
 from __future__ import annotations
 
@@ -41,10 +46,12 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 
 TABS: dict[str, list[str]] = {
+    "Rekeningen": ["Naam", "IBAN", "Van", "Doel"],
+    "Inkomsten": ["Naam", "Bedrag", "Frequentie", "Komt binnen op", "Hoort bij", "Herkenning", "Notitie"],
     "Vaste lasten": ["Naam", "Categorie", "Bedrag", "Frequentie", "Betaald van", "Hoort bij",
-                     "Betaaldag", "Opzegtermijn", "Einddatum", "Document", "Notitie"],
+                     "Betaaldag", "Opzegtermijn", "Einddatum", "Herkenning", "Document", "Notitie"],
     "Polissen": ["Verzekering", "Verzekeraar", "Dekking", "Premie", "Frequentie", "Eigen risico",
-                 "Betaald van", "Hoort bij", "Einddatum", "Opzegtermijn", "Document", "Notitie"],
+                 "Betaald van", "Hoort bij", "Einddatum", "Opzegtermijn", "Herkenning", "Document", "Notitie"],
     "Hypotheek": ["Deel", "Verstrekker", "Hoofdsom", "Restschuld", "Rente %", "Rentevast tot",
                   "Aflossingsvorm", "Maandlast", "Waarvan rente", "Waarvan aflossing", "Einddatum",
                   "Document", "Notitie"],
@@ -54,12 +61,14 @@ TABS: dict[str, list[str]] = {
 }
 
 VOORBEELDEN: dict[str, list[list]] = {
+    "Rekeningen": [["Gezamenlijk (voorbeeld)", "NL00BANK0000000000", "gezamenlijk", "vaste lasten gezin"]],
+    "Inkomsten": [["Salaris (voorbeeld)", 3000, "maand", "Privé A", "A", "", ""]],
     "Vaste lasten": [
-        ["Energie (voorbeeld)", "Wonen", 180, "maand", "gezamenlijk", "gezamenlijk", 1, "1 maand", "", "", "vervang of verwijder deze voorbeeldregel"],
-        ["Netflix (voorbeeld)", "Abonnementen", 15.99, "maand", "Jaap", "gezamenlijk", 12, "1 maand", "", "", ""],
+        ["Energie (voorbeeld)", "Wonen", 180, "maand", "gezamenlijk", "gezamenlijk", 1, "1 maand", "", "", "", "vervang of verwijder deze voorbeeldregel"],
+        ["Netflix (voorbeeld)", "Abonnementen", 15.99, "maand", "Privé A", "gezamenlijk", 12, "1 maand", "", "", "", ""],
     ],
     "Polissen": [
-        ["Autoverzekering (voorbeeld)", "—", "WA + casco", 62, "maand", 150, "Jaap", "gezamenlijk", "31-12-2026", "1 maand", "", ""],
+        ["Autoverzekering (voorbeeld)", "—", "WA + casco", 62, "maand", 150, "Privé A", "gezamenlijk", "31-12-2026", "1 maand", "", "", ""],
     ],
     "Hypotheek": [
         ["Deel 1 (voorbeeld)", "—", 300000, 250000, 3.1, "01-07-2030", "annuïteit", 1450, 640, 810, "01-07-2050", "", ""],
@@ -236,9 +245,10 @@ def _laad_werkboek():
     return load_workbook(io.BytesIO(data), data_only=True), link
 
 
-def register(wb=None, vandaag: date | None = None, verdeling: dict[str, float] | None = None) -> dict:
-    """Alles omgerekend naar per maand + verrekening + signalen. `wb` = openpyxl-werkboek
-    (voor tests); anders wordt de Sheet uit Drive geladen."""
+def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None) -> dict:
+    """Alles omgerekend naar per maand + verrekening (pot-model) + signalen. `wb` = openpyxl-
+    werkboek (voor tests); anders wordt de Sheet uit Drive geladen. `verdeling` is niet meer
+    in gebruik (compat)."""
     vandaag = vandaag or date.today()
     link = ""
     if wb is None:
@@ -256,6 +266,29 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict[str, float] |
         w = ws(tab)
         return _rijen(w, TABS[tab]) if w is not None else []
 
+    # rekeningen: naam → van wie (zodat "betaald van ABN Jaap" telt als Jaap)
+    rekeningen = []
+    rek_van: dict[str, str] = {}
+    for r in lees("Rekeningen"):
+        naam, van = str(r.get("Naam")).strip(), _wie(r.get("Van"))
+        rekeningen.append({"naam": naam, "iban": str(r.get("IBAN") or ""), "van": van, "doel": str(r.get("Doel") or "")})
+        rek_van[naam.lower()] = van
+
+    def eigenaar(v) -> str:
+        """rekeningnaam of persoonsnaam → persoon/gezamenlijk"""
+        w = _wie(v)
+        return rek_van.get(w.lower(), w)
+
+    # inkomsten
+    inkomsten = []
+    for r in lees("Inkomsten"):
+        inkomsten.append({
+            "naam": str(r.get("Naam")), "bedrag": _bedrag(r.get("Bedrag")), "frequentie": str(r.get("Frequentie") or "maand"),
+            "per_maand": per_maand(r.get("Bedrag"), r.get("Frequentie")),
+            "komt_binnen_op": _wie(r.get("Komt binnen op")), "ontvanger": eigenaar(r.get("Komt binnen op")),
+            "hoort_bij": _wie(r.get("Hoort bij")), "notitie": str(r.get("Notitie") or ""),
+        })
+
     # vaste lasten
     lasten = []
     for r in lees("Vaste lasten"):
@@ -264,7 +297,8 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict[str, float] |
         lasten.append({
             "naam": str(r.get("Naam")), "categorie": str(r.get("Categorie") or "Overig"),
             "bedrag": _bedrag(r.get("Bedrag")), "frequentie": str(r.get("Frequentie") or "maand"),
-            "per_maand": pm, "betaald_van": _wie(r.get("Betaald van")), "hoort_bij": _wie(r.get("Hoort bij")),
+            "per_maand": pm, "betaald_van": _wie(r.get("Betaald van")), "betaler": eigenaar(r.get("Betaald van")),
+            "hoort_bij": _wie(r.get("Hoort bij")),
             "betaaldag": r.get("Betaaldag") or "", "opzegtermijn": str(r.get("Opzegtermijn") or ""),
             "einddatum": eind.isoformat() if eind else "", "dagen": (eind - vandaag).days if eind else None,
             "document": str(r.get("Document") or ""), "notitie": str(r.get("Notitie") or ""),
@@ -283,6 +317,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict[str, float] |
             "frequentie": str(r.get("Frequentie") or "maand"),
             "per_maand": per_maand(r.get("Premie"), r.get("Frequentie")),
             "eigen_risico": _bedrag(r.get("Eigen risico")), "betaald_van": _wie(r.get("Betaald van")),
+            "betaler": eigenaar(r.get("Betaald van")),
             "hoort_bij": _wie(r.get("Hoort bij")), "einddatum": eind.isoformat() if eind else "",
             "dagen": (eind - vandaag).days if eind else None, "opzegtermijn": str(r.get("Opzegtermijn") or ""),
             "document": str(r.get("Document") or ""), "notitie": str(r.get("Notitie") or ""),
@@ -328,7 +363,8 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict[str, float] |
             "naam": str(r.get("Naam")), "richting": richting, "bedrag": _bedrag(r.get("Bedrag")),
             "frequentie": str(r.get("Frequentie") or "maand"),
             "per_maand": per_maand(r.get("Bedrag"), r.get("Frequentie")),
-            "van": _wie(r.get("Van")), "naar": _wie(r.get("Naar")), "hoort_bij": _wie(r.get("Hoort bij")),
+            "van": _wie(r.get("Van")), "betaler": eigenaar(r.get("Van")), "naar": _wie(r.get("Naar")),
+            "hoort_bij": _wie(r.get("Hoort bij")),
             "categorie": str(r.get("Categorie") or ""), "uitleg": str(r.get("Uitleg") or ""),
         })
     constructies: dict[str, dict] = {}
@@ -343,63 +379,75 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict[str, float] |
         c["in_pm"], c["uit_pm"] = round(c["in_pm"], 2), round(c["uit_pm"], 2)
         c["netto_pm"] = round(c["in_pm"] - c["uit_pm"], 2)
 
-    # verrekening: wie betaalde wat dat (deels) bij een ander hoort
-    # gezinsleden = wie betaalt of bij wie iets hoort; externe partijen (vader, bank) tellen niet mee
-    personen = sorted({x for l in lasten + polissen for x in (l["betaald_van"], l["hoort_bij"]) if x != "gezamenlijk"}
+    # verrekening (pot-model): de gezamenlijke rekening is de pot. Wie privé iets betaalt dat
+    # bij de pot hoort, krijgt dat van de pot terug (+). Wie privé iets ontvangt of laat betalen
+    # dat van de pot is, is dat de pot schuldig (−). Inleg-afspraken tellen niet mee.
+    personen = sorted({x for l in lasten + polissen for x in (l["betaler"], l["hoort_bij"]) if x != "gezamenlijk"}
+                      | {i["hoort_bij"] for i in inkomsten if i["hoort_bij"] != "gezamenlijk"}
+                      | {i["ontvanger"] for i in inkomsten if i["ontvanger"] != "gezamenlijk"}
                       | {s["hoort_bij"] for s in stromen if s["hoort_bij"] != "gezamenlijk"})
-    verdeling = verdeling or {p: 1 / max(1, len(personen)) for p in personen}
-    saldo: dict[str, float] = {p: 0.0 for p in personen}  # + = heeft te veel betaald, − = te weinig
+    saldo: dict[str, float] = {p: 0.0 for p in personen}  # + = pot is deze persoon geld schuldig
     regels = []
 
-    def boek(item_naam, bedrag_pm, betaald_van, hoort_bij):
-        if bedrag_pm <= 0 or betaald_van == hoort_bij:
+    def boek(wat, bedrag_pm, betaler, hoort_bij, soort="uitgave"):
+        if bedrag_pm <= 0 or betaler == hoort_bij:
             return
-        if betaald_van == "gezamenlijk":
-            # van de gezamenlijke rekening betaald, hoort bij één persoon → die persoon "leent" van samen
-            if hoort_bij in saldo:
-                saldo[hoort_bij] -= bedrag_pm
-                regels.append({"wat": item_naam, "bedrag": bedrag_pm, "tekst": f"{hoort_bij} betaalt dit eigenlijk zelf, kwam van gezamenlijk"})
+        if soort == "inkomst":
+            if hoort_bij == "gezamenlijk" and betaler in saldo:      # privé ontvangen, is van de pot
+                saldo[betaler] -= bedrag_pm
+                regels.append({"wat": wat, "bedrag": bedrag_pm, "wie": betaler, "richting": "aan_pot",
+                               "tekst": f"komt binnen bij {betaler}, maar is van de pot"})
+            elif betaler == "gezamenlijk" and hoort_bij in saldo:   # op de pot ontvangen, is van een persoon
+                saldo[hoort_bij] += bedrag_pm
+                regels.append({"wat": wat, "bedrag": bedrag_pm, "wie": hoort_bij, "richting": "van_pot",
+                               "tekst": f"komt binnen op de pot, maar is van {hoort_bij}"})
             return
-        if betaald_van not in saldo:
-            return
-        if hoort_bij == "gezamenlijk":
-            aandeel_zelf = verdeling.get(betaald_van, 0.5)
-            saldo[betaald_van] += round(bedrag_pm * (1 - aandeel_zelf), 2)
-            for p in personen:
-                if p != betaald_van:
-                    saldo[p] -= round(bedrag_pm * verdeling.get(p, 0.5), 2)
-            regels.append({"wat": item_naam, "bedrag": bedrag_pm, "tekst": f"gezamenlijk, maar betaald van {betaald_van}"})
-        elif hoort_bij in saldo:
-            saldo[betaald_van] += bedrag_pm
+        if betaler == "gezamenlijk" and hoort_bij in saldo:          # pot betaalt iets van een persoon
             saldo[hoort_bij] -= bedrag_pm
-            regels.append({"wat": item_naam, "bedrag": bedrag_pm, "tekst": f"van {hoort_bij}, maar betaald van {betaald_van}"})
+            regels.append({"wat": wat, "bedrag": bedrag_pm, "wie": hoort_bij, "richting": "aan_pot",
+                           "tekst": f"van {hoort_bij}, maar betaald door de pot"})
+        elif hoort_bij == "gezamenlijk" and betaler in saldo:        # persoon betaalt iets van de pot
+            saldo[betaler] += bedrag_pm
+            regels.append({"wat": wat, "bedrag": bedrag_pm, "wie": betaler, "richting": "van_pot",
+                           "tekst": f"van de pot, maar betaald door {betaler}"})
+        elif betaler in saldo and hoort_bij in saldo:                # persoon betaalt iets van de ander
+            saldo[betaler] += bedrag_pm
+            saldo[hoort_bij] -= bedrag_pm
+            regels.append({"wat": wat, "bedrag": bedrag_pm, "wie": betaler, "richting": "van_pot",
+                           "tekst": f"van {hoort_bij}, maar betaald door {betaler}"})
 
     for l in lasten:
-        boek(l["naam"], l["per_maand"], l["betaald_van"], l["hoort_bij"])
+        boek(l["naam"], l["per_maand"], l["betaler"], l["hoort_bij"])
     for p in polissen:
-        boek(p["naam"], p["per_maand"], p["betaald_van"], p["hoort_bij"])
-    for s in stromen:
-        if s["richting"] == "uit":
-            boek(s["naam"], s["per_maand"], s["van"], s["hoort_bij"])
+        boek(p["naam"], p["per_maand"], p["betaler"], p["hoort_bij"])
+    for i in inkomsten:
+        boek(i["naam"], i["per_maand"], i["ontvanger"], i["hoort_bij"], "inkomst")
+    for st in stromen:
+        if st["richting"] == "uit" and st["categorie"].lower() != "inleg":
+            boek(st["naam"], st["per_maand"], st["betaler"], st["hoort_bij"])
+        elif st["richting"] == "in" and st["categorie"].lower() != "inleg":
+            boek(st["naam"], st["per_maand"], eigenaar(st["naar"]), st["hoort_bij"], "inkomst")
     saldo = {p: round(v, 2) for p, v in saldo.items()}
-    verreken_tekst = ""
-    if len(personen) == 2:
-        a, b = personen
-        if saldo[a] > 0.5:
-            verreken_tekst = f"{b} moet {a} ongeveer € {saldo[a]:,.0f} per maand overmaken"
-        elif saldo[b] > 0.5:
-            verreken_tekst = f"{a} moet {b} ongeveer € {saldo[b]:,.0f} per maand overmaken"
-        else:
-            verreken_tekst = "in balans — niets te verrekenen"
+    delen_tekst = []
+    for p, v in saldo.items():
+        if v > 0.5:
+            delen_tekst.append(f"de pot is {p} € {v:,.0f} per maand schuldig")
+        elif v < -0.5:
+            delen_tekst.append(f"{p} is de pot € {-v:,.0f} per maand schuldig")
+    verreken_tekst = "; ".join(delen_tekst) if delen_tekst else "structureel in balans"
+    verdeling = {}
 
     # uitleg-cache (door Birdy geschreven)
     uitleg = {str(r.get("Onderwerp")).strip().lower(): {"tekst": str(r.get("Tekst") or ""),
                                                           "bijgewerkt": str(r.get("Bijgewerkt") or "")}
               for r in lees("Uitleg") if r.get("Onderwerp")}
 
+    inleg = [c for c in constructies.values() if any(st["categorie"].lower() == "inleg" for st in c["stromen"])]
+    echte_constructies = [c for c in constructies.values() if c not in inleg]
     totaal_vast = round(sum(l["per_maand"] for l in lasten) + sum(p["per_maand"] for p in polissen)
-                        + hyp["maandlast"] + sum(c["uit_pm"] for c in constructies.values()), 2)
-    totaal_in = round(sum(c["in_pm"] for c in constructies.values()), 2)
+                        + hyp["maandlast"] + sum(c["uit_pm"] for c in echte_constructies), 2)
+    totaal_in = round(sum(c["in_pm"] for c in echte_constructies), 2)
+    inkomen_pm = round(sum(i["per_maand"] for i in inkomsten), 2)
 
     return {
         "beschikbaar": True, "link": link, "vandaag": vandaag.isoformat(),
@@ -407,10 +455,14 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict[str, float] |
         "per_categorie": dict(sorted(per_cat.items(), key=lambda kv: -kv[1])),
         "polissen": sorted(polissen, key=lambda p: (p["dagen"] is None, p["dagen"] or 0)),
         "hypotheek": hyp,
-        "constructies": list(constructies.values()),
+        "rekeningen": rekeningen,
+        "inkomsten": sorted(inkomsten, key=lambda i: -i["per_maand"]),
+        "constructies": echte_constructies,
+        "inleg": inleg,
         "verrekening": {"personen": personen, "saldo": saldo, "regels": regels, "tekst": verreken_tekst,
                         "verdeling": verdeling},
         "totalen": {"vast_pm": totaal_vast, "in_pm": totaal_in, "netto_pm": round(totaal_vast - totaal_in, 2),
+                    "inkomen_pm": inkomen_pm, "over_pm": round(inkomen_pm - (totaal_vast - totaal_in), 2),
                     "lasten_pm": round(sum(l["per_maand"] for l in lasten), 2),
                     "polissen_pm": round(sum(p["per_maand"] for p in polissen), 2)},
         "uitleg": uitleg,
@@ -452,6 +504,10 @@ def toon() -> str:
               f"Vaste lasten totaal € {r['totalen']['vast_pm']:,.2f}/mnd (lasten {r['totalen']['lasten_pm']:,.2f} · "
               f"polissen {r['totalen']['polissen_pm']:,.2f} · hypotheek {r['hypotheek']['maandlast']:,.2f}) · "
               f"terugkomend € {r['totalen']['in_pm']:,.2f}/mnd → netto € {r['totalen']['netto_pm']:,.2f}/mnd", ""]
+    if r["inkomsten"]:
+        regels.append(f"INKOMSTEN € {r['totalen']['inkomen_pm']:,.2f}/mnd → blijft over € {r['totalen']['over_pm']:,.2f}/mnd")
+        for i in r["inkomsten"]:
+            regels.append(f"• {i['naam']} — € {i['bedrag']:,.2f} per {i['frequentie']} (= {i['per_maand']:,.2f}/mnd) · komt binnen op {i['komt_binnen_op']} · hoort bij {i['hoort_bij']}")
     regels.append("VASTE LASTEN")
     for l in r["vaste_lasten"]:
         regels.append(f"• {l['naam']} — {l['categorie']} · € {l['bedrag']:,.2f} per {l['frequentie']} (= {l['per_maand']:,.2f}/mnd) · "
@@ -472,8 +528,12 @@ def toon() -> str:
     for c in r["constructies"]:
         regels.append(f"• {c['naam']}: uit € {c['uit_pm']:,.2f}/mnd, in € {c['in_pm']:,.2f}/mnd → netto {c['netto_pm']:+,.2f}/mnd"
                       + (f" · {c['uitleg']}" if c["uitleg"] else ""))
+    for c in r["inleg"]:
+        regels.append(f"• INLEG {c['naam']}: € {c['uit_pm']:,.2f}/mnd (afspraak, telt niet mee in verrekenen)")
     v = r["verrekening"]
-    regels.append(f"VERREKENING: {v['tekst'] or 'n.v.t.'}" + (f" · saldo per maand {v['saldo']}" if v["saldo"] else ""))
+    regels.append(f"VERREKENING (structureel, per maand, t.o.v. de pot): {v['tekst']}")
+    for rg in v["regels"]:
+        regels.append(f"  - {rg['wat']}: € {rg['bedrag']:,.2f} · {rg['tekst']}")
     for s in r["signalen"]:
         regels.append(f"SIGNAAL: {s['tekst']}")
     return "\n".join(regels)

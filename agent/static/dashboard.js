@@ -1466,7 +1466,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // ── Geld-tab: financieel register uit de Sheet, achter een pincode (per apparaat één keer) ──
-let GELD = null, GELDPIN = null;
+let GELD = null, GELDPIN = null, VERREKEN = null;
 try { GELDPIN = sessionStorage.getItem('birdy-geld-pin'); } catch(e){}
 function euro(n){ return '€ ' + (Math.round(n || 0)).toLocaleString('nl-NL'); }
 function euro2(n){ return '€ ' + (n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -1497,7 +1497,9 @@ async function renderGeld(){
   html += '<div class="geld-grid">';
   // 1. vaste lasten
   html += `<div class="panel"><div class="kaartkop"><span class="ico">📉</span><h2>Vaste lasten</h2></div>
-    <div class="geld-groot">${euro(t.vast_pm)}<small>per maand alles bij elkaar</small></div>
+    <div class="geld-groot">${euro(t.vast_pm)}<small>vaste lasten per maand</small></div>
+    ${t.inkomen_pm ? `<div class="geld-rij"><span>Inkomen (${(g.inkomsten || []).length} bronnen)</span><b>${euro(t.inkomen_pm)}</b></div>
+    <div class="geld-rij"><span><b>Blijft over voor de rest</b></span><b style="color:${t.over_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_pm)}</b></div>` : ''}
     <div class="geld-balk">${cats.map(([c, n], i) => `<i style="width:${(n / catTot * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(c)}"></i>`).join('')}</div>
     ${cats.map(([c, n], i) => `<div class="geld-rij"><span><i class="init" style="background:${kleuren[i % kleuren.length]};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>${esc(c)}</span><b>${euro(n)}</b></div>`).join('')}
     <div class="geld-rij"><span>Polissen</span><b>${euro(t.polissen_pm)}</b></div>
@@ -1527,15 +1529,35 @@ async function renderGeld(){
       ${p.dagen !== null ? `<small class="${p.dagen < 45 ? 'laat' : ''}" style="${p.dagen < 45 ? 'color:var(--amber)' : ''}">${p.dagen < 0 ? 'verlopen' : 'tot ' + esc(p.einddatum)}</small>` : ''}<b>${euro2(p.per_maand)}</b></div>`).join('') || '<p class="leeg">nog geen polissen ingevuld</p>'}
     ${geldUitlegKnop(g, 'polissen', 'Leg in gewone taal uit welke verzekeringen we hebben, waar ze voor zijn, wat eigen risico betekent en waar we op moeten letten bij opzeggen.')}
   </div>`;
-  // 4. constructies + verrekening
-  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies & verrekenen</h2></div>
+  // 4. constructies + verrekenen (pot-model: structureel uit het register + losse posten)
+  const vr = VERREKEN || { posten: [], afrekeningen: [] };
+  const open = vr.posten.filter(p => !p.verrekend);
+  const saldoLos = {};
+  open.forEach(p => { saldoLos[p.wie] = Math.round(((saldoLos[p.wie] || 0) + (p.richting === 'voor_pot' ? p.bedrag : -p.bedrag)) * 100) / 100; });
+  const personen = [...new Set([...(v.personen || []), ...PERSONEN.slice(0, 2)])].filter(Boolean);
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies</h2></div>
     ${(g.constructies || []).map(c => `<div class="geld-rij"><span>${esc(c.naam)}<br><small>uit ${euro(c.uit_pm)} · terug ${euro(c.in_pm)} per maand</small></span><b style="color:${c.netto_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${c.netto_pm >= 0 ? '+' : '−'} ${euro(Math.abs(c.netto_pm))}</b></div>
-      ${c.uitleg ? `<div class="geld-uitleg">${esc(c.uitleg)}</div>` : ''}`).join('') || ''}
-    <h4 style="margin-top:.6rem">Verrekenen</h4>
-    <div class="geld-saldo">${esc(v.tekst || 'nog niets om te verrekenen')}</div>
-    ${(v.regels || []).slice(0, 8).map(r => `<div class="geld-rij"><span>${esc(r.wat)} <small>· ${esc(r.tekst)}</small></span><b>${euro2(r.bedrag)}</b></div>`).join('')}
-    <p class="notitie" style="margin-top:.5rem">Gezamenlijke kosten worden ${Object.keys(v.verdeling || {}).length ? Object.entries(v.verdeling).map(([p, a]) => esc(p) + ' ' + Math.round(a * 100) + '%').join(' / ') : 'gelijk'} verdeeld.</p>
-    ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen en constructies werken en wie wat aan wie moet overmaken om het eerlijk te houden.')}
+      ${c.uitleg ? `<div class="geld-uitleg">${esc(c.uitleg)}</div>` : ''}`).join('') || '<p class="leeg">geen constructies</p>'}
+    ${(g.inleg || []).length ? '<h4 style="margin-top:.6rem">Afspraak: inleg op de pot</h4>' + g.inleg.map(c => `<div class="geld-rij"><span>${esc(c.naam)}</span><b>${euro(c.uit_pm)}<small> /mnd</small></b></div>`).join('') : ''}
+    ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen en constructies werken, en wat de inleg-afspraak inhoudt.')}
+  </div>`;
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">⚖️</span><h2>Verrekenen</h2><b>${open.length || ''}</b></div>
+    <p class="notitie">Iets privé betaald dat van de pot (gezamenlijk) had moeten komen? Zet het hier; einde maand druk je op Afrekenen.</p>
+    <div class="vr-form">
+      <select id="vrWie">${personen.map(p => `<option>${esc(p)}</option>`).join('')}</select>
+      <input id="vrBedrag" type="number" inputmode="decimal" step="0.01" min="0" placeholder="€ bedrag">
+      <input id="vrOms" placeholder="wat was het?" maxlength="120" onkeydown="if(event.key==='Enter')vrToevoegen()">
+      <select id="vrRichting"><option value="voor_pot">betaald voor de pot</option><option value="uit_pot">van de pot ontvangen / privé uitgegeven</option></select>
+      <button class="aknop" onclick="vrToevoegen()">＋ Toevoegen</button>
+    </div>
+    ${open.length ? open.slice().reverse().map(p => `<div class="geld-rij"><small>${esc(p.datum.slice(5))}</small><span>${esc(p.omschrijving || '(geen omschrijving)')} <small>· ${esc(p.wie)} ${p.richting === 'voor_pot' ? 'voor de pot' : 'uit de pot'}</small></span><b>${p.richting === 'voor_pot' ? '+' : '−'} ${euro2(p.bedrag)}</b><button class="herstelknop" title="verwijderen" onclick="vrVerwijder('${p.id}')">✕</button></div>`).join('')
+      : '<p class="leeg">geen open posten</p>'}
+    ${open.length ? `<div class="geld-saldo">${Object.entries(saldoLos).map(([w, b]) => b >= 0 ? `pot → ${esc(w)}: ${euro2(b)}` : `${esc(w)} → pot: ${euro2(-b)}`).join(' · ')}</div>
+      <button class="blikknop" onclick="vrAfrekenen()">✅ Afrekenen (${open.length} ${open.length === 1 ? 'post' : 'posten'})</button>` : ''}
+    <h4 style="margin-top:.8rem">Structureel, per maand</h4>
+    <div class="geld-saldo" style="font-weight:500">${esc(v.tekst || 'in balans')}</div>
+    ${(v.regels || []).slice(0, 8).map(r => `<div class="geld-rij"><span>${esc(r.wat)} <small>· ${esc(r.tekst)}</small></span><b>${r.richting === 'van_pot' ? '+' : '−'} ${euro2(r.bedrag)}</b></div>`).join('')}
+    ${(vr.afrekeningen || []).length ? '<h4 style="margin-top:.8rem">Eerdere afrekeningen</h4>' + vr.afrekeningen.slice(0, 4).map(a => `<div class="geld-rij"><small>${esc(a.datum.slice(5))}</small><span>${esc(a.tekst)} <small>· ${a.aantal} posten</small></span></div>`).join('') : ''}
   </div>`;
   html += '</div>' + geldWoordenlijst(g);
   el.innerHTML = html;
@@ -1556,7 +1578,30 @@ async function geldLaad(ververs){
     if (r.status === 403){ GELDPIN = null; try { sessionStorage.removeItem('birdy-geld-pin'); } catch(e){} toon(d.error || 'pincode klopt niet'); GELD = null; renderGeld(); return; }
     if (!r.ok) throw new Error(d.error || 'fout');
     GELD = d;
+    const rv = await fetch('/api/verreken', { headers: { 'X-Dashboard-Key': KEY, 'X-Geld-Pin': GELDPIN || '' } });
+    if (rv.ok) VERREKEN = await rv.json();
   } catch(e){ toon('Financieel overzicht laden lukte even niet.'); }
+}
+async function vrPost(body){
+  const r = await fetch('/api/verreken', { method:'POST', headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY, 'X-Geld-Pin':GELDPIN || '' }, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'fout');
+  return d;
+}
+async function vrToevoegen(){
+  const wie = document.getElementById('vrWie').value, bedrag = document.getElementById('vrBedrag').value,
+        omschrijving = document.getElementById('vrOms').value.trim(), richting = document.getElementById('vrRichting').value;
+  if (!bedrag || Number(bedrag) <= 0){ toon('Vul een bedrag in.'); return; }
+  try { await vrPost({ actie:'toevoegen', wie, bedrag, omschrijving, richting }); toon(`⚖️ Genoteerd: ${wie} ${euro2(Number(bedrag))}`); await geldLaad(); renderGeld(); }
+  catch(e){ toon('Toevoegen lukte niet: ' + e.message); }
+}
+async function vrVerwijder(id){
+  try { await vrPost({ actie:'verwijderen', id }); await geldLaad(); renderGeld(); } catch(e){ toon('Verwijderen lukte niet.'); }
+}
+async function vrAfrekenen(){
+  if (!confirm('Alle open posten afrekenen en afsluiten?')) return;
+  try { const d = await vrPost({ actie:'afrekenen' }); toon('✅ Afgerekend: ' + d.afrekening.tekst); await geldLaad(); renderGeld(); }
+  catch(e){ toon('Afrekenen lukte niet: ' + e.message); }
 }
 async function geldOntgrendel(){
   const pin = (document.getElementById('geldPin').value || '').trim();

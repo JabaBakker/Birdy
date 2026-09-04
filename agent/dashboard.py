@@ -82,6 +82,8 @@ class Dashboard:
         for naam in STATIC_BESTANDEN:
             app.router.add_get(f"/{naam}", self.static)
         app.router.add_get("/api/geld", self.geld)
+        app.router.add_get("/api/verreken", self.verreken_get)
+        app.router.add_post("/api/verreken", self.verreken_post)
         app.router.add_get("/api/plan", self.plan_get)
         app.router.add_post("/api/plan", self.plan_post)
         app.router.add_get("/api/overview", self.overview)
@@ -144,8 +146,7 @@ class Dashboard:
     async def _geld_lees(self) -> dict:
         if self._geld is None or time.time() - self._geld_ts > 300:
             try:
-                self._geld = await asyncio.to_thread(financien.register, None, None,
-                                                     self.cfg.financien_verdeling or None)
+                self._geld = await asyncio.to_thread(financien.register)
             except BaseException:
                 log.warning("financieel register lezen mislukt", exc_info=True)
                 self._geld = self._geld or {"beschikbaar": False, "link": "", "woordenlijst": financien.WOORDENLIJST}
@@ -164,6 +165,94 @@ class Dashboard:
             self._geld = None
         data = await self._geld_lees()
         return web.json_response(data, headers={"Cache-Control": "no-store"})
+
+    # -- verrekenen: losse posten die eigenlijk van de pot (gezamenlijk) waren ------
+
+    def _verreken_pad(self) -> Path:
+        return self.cfg.workspace / "memory" / "verrekenen.json"
+
+    def _verreken_lees(self) -> dict:
+        try:
+            d = json.loads(self._verreken_pad().read_text())
+            if isinstance(d, dict):
+                return {"posten": list(d.get("posten") or []), "afrekeningen": list(d.get("afrekeningen") or [])}
+        except (OSError, ValueError):
+            pass
+        return {"posten": [], "afrekeningen": []}
+
+    def _verreken_schrijf(self, d: dict) -> None:
+        pad = self._verreken_pad()
+        pad.parent.mkdir(parents=True, exist_ok=True)
+        tmp = pad.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1))
+        tmp.replace(pad)
+
+    def _geld_ok(self, request: web.Request) -> web.Response | None:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        if not self.cfg.dashboard_geld_pin or request.headers.get("X-Geld-Pin", "") != self.cfg.dashboard_geld_pin:
+            return web.json_response({"error": "pincode klopt niet"}, status=403)
+        return None
+
+    async def verreken_get(self, request: web.Request) -> web.Response:
+        fout = self._geld_ok(request)
+        if fout:
+            return fout
+        return web.json_response(self._verreken_lees(), headers={"Cache-Control": "no-store"})
+
+    async def verreken_post(self, request: web.Request) -> web.Response:
+        """{actie: 'toevoegen', wie, bedrag, omschrijving, richting: 'voor_pot'|'uit_pot', datum?}
+        {actie: 'verwijderen', id} · {actie: 'afrekenen'} → alle open posten afsluiten."""
+        fout = self._geld_ok(request)
+        if fout:
+            return fout
+        try:
+            body = await request.json()
+            assert isinstance(body, dict)
+        except Exception:
+            return web.json_response({"error": "geen geldige json"}, status=400)
+        d = self._verreken_lees()
+        actie = str(body.get("actie", "")).strip()
+        if actie == "toevoegen":
+            wie = str(body.get("wie", "")).strip()[:30]
+            oms = str(body.get("omschrijving", "")).strip()[:120]
+            richting = str(body.get("richting", "voor_pot"))
+            try:
+                bedrag = round(float(str(body.get("bedrag", "")).replace(",", ".")), 2)
+            except ValueError:
+                bedrag = 0.0
+            if not wie or bedrag <= 0 or richting not in ("voor_pot", "uit_pot"):
+                return web.json_response({"error": "wie, bedrag (> 0) en richting zijn nodig"}, status=400)
+            datum = str(body.get("datum") or date.today().isoformat())[:10]
+            post = {"id": f"{int(time.time() * 1000)}", "datum": datum, "wie": wie, "bedrag": bedrag,
+                    "omschrijving": oms, "richting": richting, "verrekend": ""}
+            d["posten"].append(post)
+            self._verreken_schrijf(d)
+            return web.json_response({"ok": True, "post": post})
+        if actie == "verwijderen":
+            pid = str(body.get("id", ""))
+            voor = len(d["posten"])
+            d["posten"] = [p for p in d["posten"] if not (p["id"] == pid and not p.get("verrekend"))]
+            self._verreken_schrijf(d)
+            return web.json_response({"ok": len(d["posten"]) < voor})
+        if actie == "afrekenen":
+            open_ = [p for p in d["posten"] if not p.get("verrekend")]
+            if not open_:
+                return web.json_response({"error": "niets te verrekenen"}, status=400)
+            saldo: dict[str, float] = {}
+            for p in open_:
+                saldo[p["wie"]] = round(saldo.get(p["wie"], 0) + (p["bedrag"] if p["richting"] == "voor_pot" else -p["bedrag"]), 2)
+            vandaag = date.today().isoformat()
+            regels = [f"pot → {w}: € {v:,.2f}" if v > 0 else f"{w} → pot: € {-v:,.2f}" for w, v in saldo.items() if abs(v) >= 0.005]
+            afrekening = {"datum": vandaag, "aantal": len(open_), "saldo": saldo, "tekst": "; ".join(regels) or "in balans",
+                          "van": min(p["datum"] for p in open_), "tot": max(p["datum"] for p in open_)}
+            for p in open_:
+                p["verrekend"] = vandaag
+            d["afrekeningen"].insert(0, afrekening)
+            d["afrekeningen"] = d["afrekeningen"][:24]
+            self._verreken_schrijf(d)
+            return web.json_response({"ok": True, "afrekening": afrekening})
+        return web.json_response({"error": "onbekende actie"}, status=400)
 
     # -- gedeelde kinderplanning (zelfde timer op tablet én telefoon) -------
 
