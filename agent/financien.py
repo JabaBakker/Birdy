@@ -581,7 +581,9 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
                         + hyp["maandlast"] + sum(c["uit_pm"] for c in echte_constructies), 2)
     totaal_in = round(sum(c["in_pm"] for c in echte_constructies), 2)
     inkomen_pm = round(sum(i["per_maand"] for i in inkomsten), 2)
-    variabel_pm = round(sum(x["per_maand"] for x in variabel), 2)
+    sparen = [x for x in variabel if any(w in x["naam"].lower() for w in ("spaar", "sparen", "beleg", "pensioen"))]
+    sparen_pm = round(sum(x["per_maand"] for x in sparen), 2)
+    variabel_pm = round(sum(x["per_maand"] for x in variabel) - sparen_pm, 2)  # sparen is een keuze, geen kostenpost
     reservering_pm = round((inc_uit - inc_in) / 12, 2)  # wat je per maand opzij zou zetten voor voorspelbare pieken
 
     return {
@@ -601,7 +603,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
         "verrekening": {"personen": personen, "saldo": saldo, "regels": regels, "tekst": verreken_tekst,
                         "verdeling": verdeling},
         "totalen": {"vast_pm": totaal_vast, "in_pm": totaal_in, "netto_pm": round(totaal_vast - totaal_in, 2),
-                    "inkomen_pm": inkomen_pm, "variabel_pm": variabel_pm,
+                    "inkomen_pm": inkomen_pm, "variabel_pm": variabel_pm, "sparen_pm": sparen_pm,
                     "over_pm": round(inkomen_pm - (totaal_vast - totaal_in) - variabel_pm, 2),
                     "incidenteel_in_jaar": inc_in, "incidenteel_uit_jaar": inc_uit, "reservering_pm": reservering_pm,
                     "over_na_reservering_pm": round(inkomen_pm - (totaal_vast - totaal_in) - variabel_pm - reservering_pm, 2),
