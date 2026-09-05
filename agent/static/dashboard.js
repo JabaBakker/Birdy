@@ -37,6 +37,8 @@ function vulMeer(id, items, maak, max, l2){
   el.innerHTML = html;
 }
 function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+// waarde als JS-literal in een onclick="…"-attribuut: JSON bevat dubbele aanhalingstekens, dus HTML-escapen
+function jsAttr(v){ return JSON.stringify(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function taakRij(x){
   const p = persoonMatch(x.tekst);
   // tekst links; rechts vast: initiaal van de persoon, datum-pil of '+' om een datum te prikken
@@ -100,7 +102,7 @@ function aandachtKaart(s, i){
   const kl = s.ernst === 0 ? 'var(--rood)' : 'var(--amber)';
   const open = s.l2 === 'week' ? "kiesTab('week')" : `openL2('${s.l2}')`;
   let knop = '';
-  if (s.knop) knop = `<button class="aknop" onclick="event.stopPropagation();snelActie(${JSON.stringify(s.knop.tekst)},${JSON.stringify(s.knop.datum || '')},this)">＋ ${esc(s.knop.label)}</button>`;
+  if (s.knop) knop = `<button class="aknop" onclick="event.stopPropagation();snelActie(${jsAttr(s.knop.tekst)},${jsAttr(s.knop.datum || '')},this)">＋ ${esc(s.knop.label)}</button>`;
   else if (s.l2 === 'week') knop = `<button class="aknop" onclick="event.stopPropagation();kiesTab('week')">Agenda bekijken</button>`;
   return `<div class="akaart" style="--kl:${kl}" onclick="${open}"><div class="akop">${kop}</div>` +
     `<div class="atekst">${esc(s.tekst)}</div>${knop}</div>`;
@@ -1523,7 +1525,7 @@ function geldOverzicht(g){
     <div class="fchips" style="margin:.1rem 0 .5rem">${wieOpties.map(w => `<button class="fchip${GELDWIE === w ? ' actief' : ''}" onclick="GELDWIE='${esc(w)}';renderGeld()">${w === 'gezamenlijk' ? 'de pot' : esc(w)}</button>`).join('')}</div>
     <div class="geld-groot">${euro(vastF)}<small>per maand${GELDWIE === 'alles' ? '' : ' · ' + (GELDWIE === 'gezamenlijk' ? 'van de pot' : 'van ' + esc(GELDWIE))}</small></div>
     <div class="geld-balk">${catsL.map(([c, n], i) => `<i style="width:${(n / catTotF * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(c)}"></i>`).join('')}</div>
-    ${catsL.map(([c, n], i) => `<div class="geld-rij klik" onclick="geldToggle('cat-${i}')"><span>${kleurBlok(kleuren[i % kleuren.length])}${esc(c)} <small>▾</small></span><button class="herstelknop" title="eerdere uitgaven in deze categorie" onclick="event.stopPropagation();geldPop({categorie:${JSON.stringify(c)}, titel:${JSON.stringify(c)}})">📊</button><b>${euro(n)}</b></div>
+    ${catsL.map(([c, n], i) => `<div class="geld-rij klik" onclick="geldToggle('cat-${i}')"><span>${kleurBlok(kleuren[i % kleuren.length])}${esc(c)} <small>▾</small></span>${geldPopKnop({categorie: c, titel: c}, '', 'eerdere uitgaven in deze categorie')}<b>${euro(n)}</b></div>
       <div class="geld-detail" id="gd-cat-${i}" hidden>${lasten.filter(l => l.categorie === c).map((l, n) => geldRij(l, 'last', 'c' + i + '-' + n)).join('')}</div>`).join('')}
     <div class="geld-rij"><span>Polissen</span><b>${euro(polPm)}</b></div>
     ${hypF ? `<div class="geld-rij"><span>Hypotheek</span><b>${euro(hypF)}</b></div>` : ''}
@@ -1544,7 +1546,7 @@ function geldOverzicht(g){
     <p class="notitie" style="margin-top:-.3rem">Voorspelbaar maar wisselend: budget per maand</p>
     <div class="geld-groot">${euro(t.variabel_pm || 0)}<small>per maand</small></div>
     <div class="geld-balk">${budget.map((x, i) => `<i style="width:${(x.per_maand / budTot * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(x.naam)}"></i>`).join('')}</div>
-    ${budget.length ? budget.map((x, n) => `<div class="geld-rij klik" onclick="geldToggle('variabel-${n}')"><span>${kleurBlok(kleuren[n % kleuren.length])}${esc(x.naam)} <small>▾ · ${esc(x.betaald_van)}${x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}</small></span><button class="herstelknop" title="wat is er echt uitgegeven?" onclick="event.stopPropagation();geldPop({categorie:${JSON.stringify(x.naam)}, titel:${JSON.stringify(x.naam)}, budget:${x.per_maand}})">📊</button><b>${euro(x.per_maand)}</b></div><div class="geld-detail" id="gd-variabel-${n}" hidden>${geldRijDetails(x, 'variabel')}</div>`).join('')
+    ${budget.length ? budget.map((x, n) => `<div class="geld-rij klik" onclick="geldToggle('variabel-${n}')"><span>${kleurBlok(kleuren[n % kleuren.length])}${esc(x.naam)} <small>▾ · ${esc(x.betaald_van)}${x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}</small></span>${geldPopKnop({categorie: x.naam, titel: x.naam, budget: x.per_maand}, '', 'wat is er echt uitgegeven?')}<b>${euro(x.per_maand)}</b></div><div class="geld-detail" id="gd-variabel-${n}" hidden>${geldRijDetails(x, 'variabel')}</div>`).join('')
       : '<p class="notitie">Nog geen budgetten. Zet in de Sheet (tab Variabele kosten) wat per maand wisselt: boodschappen, uitjes, kleding, auto…</p>'}
     ${sparen.length ? '<h4 style="margin-top:.7rem">Bewust opzij (keuze, geen kostenpost)</h4>' + sparen.map(x => `<div class="geld-rij"><span>${esc(x.naam)} <small>· ${esc(x.betaald_van)}</small></span><b>${euro(x.per_maand)}</b></div>`).join('') : ''}
     ${geldUitlegKnop(g, 'budget', 'Leg in gewone taal uit hoe onze variabele kosten zich verhouden tot de vaste lasten en waar we op kunnen sturen.')}
@@ -1641,7 +1643,7 @@ function geldVerbeteren(g){
     ${potentie ? `<div class="geld-groot">${euro(potentie)}<small>per maand mogelijk (${bespOpen.length} open)</small></div>` : '<p class="notitie">Ideeën om goedkoper of slimmer uit te zijn; zet ze om in een actie als je ermee aan de slag wilt.</p>'}
     ${bespAlle.map((b, n) => `<div class="geld-rij klik" onclick="geldToggle('besp-${n}')"><span>${esc(b.voorstel)} <small>▾ · <i style="font-style:normal;color:${statusKl[b.status] || 'var(--dim)'}">${esc(b.status)}</i>${b.categorie ? ' · ' + esc(b.categorie) : ''}</small></span><b>${b.per_maand ? euro(b.per_maand) + '<small> /mnd</small>' : ''}</b></div>
       <div class="geld-detail" id="gd-besp-${n}" hidden>${b.notitie ? `<p class="notitie">${esc(b.notitie)}</p>` : ''}<p class="notitie">bron: ${esc(b.bron || '?')}${b.datum ? ' · ' + esc(b.datum) : ''}${b.uit === 'sheet' ? ' · uit de Sheet' : ''}</p>
-        <div style="display:flex;gap:.4rem;flex-wrap:wrap">${!['gedaan', 'afgewezen'].includes(b.status) ? `<button class="aknop" onclick="event.stopPropagation();snelActie(${JSON.stringify('Besparing: ' + b.voorstel)}, '', this)">⚡ Maak er een actie van</button>` : ''}
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">${!['gedaan', 'afgewezen'].includes(b.status) ? `<button class="aknop" onclick="event.stopPropagation();snelActie(${jsAttr('Besparing: ' + b.voorstel)}, '', this)">⚡ Maak er een actie van</button>` : ''}
         ${b.uit === 'dashboard' ? `<button class="aknop" onclick="event.stopPropagation();bespStatus('${b.id}','gedaan')">✓ gedaan</button><button class="aknop" onclick="event.stopPropagation();bespStatus('${b.id}','afgewezen')">✕ afgewezen</button>` : '<span class="notitie" style="align-self:center">status aanpassen in de Sheet</span>'}</div></div>`).join('') || ''}
     <div class="vr-form" style="margin-top:.6rem"><input id="bpVoorstel" placeholder="nieuw voorstel, bijv. 'Wellis stoppen'" maxlength="160" style="grid-column:1 / -1"><input id="bpBedrag" type="number" inputmode="decimal" step="0.01" min="0" placeholder="€ per maand"><input id="bpCat" placeholder="categorie" maxlength="40"><button class="aknop" onclick="bespToevoegen()">＋ Voorstel toevoegen</button></div>
     ${geldUitlegKnop(g, 'besparingen', 'Kijk met onze cijfers (financien.py toon) naar de vaste lasten, polissen en abonnementen: waar kunnen we besparen of overstappen? Geef concrete voorstellen als regels voor tabblad Besparingen.')}
@@ -1672,6 +1674,10 @@ function geldVerbeteren(g){
   return html + '</div>';
 }
 function geldToggle(id){ const d = document.getElementById('gd-' + id); if (d) d.hidden = !d.hidden; }
+// onclick-attribuut met een object erin: JSON bevat dubbele aanhalingstekens, dus escapen voor HTML
+function geldPopKnop(opts, tekst, titel){
+  return `<button class="${tekst ? 'aknop' : 'herstelknop'}" title="${titel || 'eerdere uitgaven'}" onclick="event.stopPropagation();geldPop(${jsAttr(opts)})">📊${tekst ? ' ' + tekst : ''}</button>`;
+}
 // één post als open-te-klikken rij met details: rekening, wie, frequentie, betaaldag, opzegtermijn, document…
 function geldRij(x, soort, n){
   const id = `${soort}-${n}`;
@@ -1707,14 +1713,14 @@ function geldRijDetails(x, soort){
   rij('Document', x.document ? (/^https?:/.test(x.document) ? `<a href="${esc(x.document)}" target="_blank" rel="noopener">📄 openen</a>` : esc(x.document)) : '');
   if (x.uitleg && soort === 'inkomst') det.push(`<div class="geld-uitleg">${esc(x.uitleg)}</div>`);
   if (x.controleren) det.push('<p class="notitie" style="color:var(--amber)">⚠ Aanname of placeholder: nog controleren en in de Sheet aanpassen.</p>');
-  if (soort !== 'hypotheek') det.push(`<button class="aknop" onclick="event.stopPropagation();geldPop(${JSON.stringify({post: x.naam, categorie: soort === 'variabel' ? x.naam : (x.categorie || ''), titel: x.naam})})">📊 Eerdere uitgaven</button>`);
+  if (soort !== 'hypotheek') det.push(geldPopKnop({post: x.naam, categorie: soort === 'variabel' ? x.naam : (x.categorie || ''), titel: x.naam}, 'Eerdere uitgaven'));
   if (x.notitie) det.push(`<p class="notitie">${esc(x.notitie)}</p>`);
   return det.join('');
 }
 function geldUitlegKnop(g, onderwerp, vraag){
   const u = (g.uitleg || {})[onderwerp];
   return (u && u.tekst ? `<div class="geld-uitleg">🐦 ${esc(u.tekst)}${u.bijgewerkt ? `<br><small class="notitie">Birdy · ${esc(u.bijgewerkt)}</small>` : ''}</div>` : '') +
-    `<button class="aknop" onclick="stuur(${JSON.stringify(vraag + ' Gebruik onze eigen cijfers (financien.py toon).')})">🐦 ${u && u.tekst ? 'Opnieuw uitleggen' : 'Leg uit met onze cijfers'}</button>`;
+    `<button class="aknop" onclick="stuur(${jsAttr(vraag + ' Gebruik onze eigen cijfers (financien.py toon).')})">🐦 ${u && u.tekst ? 'Opnieuw uitleggen' : 'Leg uit met onze cijfers'}</button>`;
 }
 function geldWoordenlijst(g){
   return `<div class="panel geld-wl" style="margin-top:.9rem"><div class="kaartkop"><span class="ico">📖</span><h2>Woordenlijst</h2></div>` +
