@@ -1470,6 +1470,7 @@ let GELD = null, GELDPIN = null, VERREKEN = null, BESPAR = null, GELDWIE = 'alle
 try { GELDPIN = sessionStorage.getItem('birdy-geld-pin'); } catch(e){}
 function euro(n){ return '€ ' + (Math.round(n || 0)).toLocaleString('nl-NL'); }
 function euro2(n){ return '€ ' + (n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+let GELDSUB = 'overzicht';
 async function renderGeld(){
   const el = document.getElementById('paneelGeld');
   if (!GELDPIN){
@@ -1482,23 +1483,26 @@ async function renderGeld(){
   }
   if (!GELD){ el.innerHTML = '<p class="leeg" style="margin:2rem">overzicht laden…</p>'; await geldLaad(); if (!GELD) return; }
   const g = GELD;
+  const kop = `<div class="geld-kop"><h2>💶 Geld</h2>
+    <div class="fchips" style="margin:0"><button class="fchip${GELDSUB === 'overzicht' ? ' actief' : ''}" onclick="GELDSUB='overzicht';renderGeld()">Overzicht</button><button class="fchip${GELDSUB === 'verbeteren' ? ' actief' : ''}" onclick="GELDSUB='verbeteren';renderGeld()">Verbeteren & verrekenen</button></div>
+    <span class="notitie">stand ${esc(g.vandaag || '')} · per maand · tik op een post voor details</span>
+    ${g.link ? `<a href="${esc(g.link)}" target="_blank" rel="noopener">📄 Sheet</a>` : ''}
+    <button class="klein" onclick="geldPlus()">＋ toevoegen</button>
+    <button class="klein" onclick="geldLaad(true).then(renderGeld)">↻</button>
+    <button class="klein" onclick="GELDPIN=null;try{sessionStorage.removeItem('birdy-geld-pin')}catch(e){};renderGeld()">🔒</button></div>`;
   if (!g.beschikbaar){
-    el.innerHTML = `<div class="geld-kop"><h2>💶 Geld</h2></div><p class="leeg">Nog geen register. Vraag Birdy: “maak het financieel overzicht aan” (of draai <code>financien.py maak</code>).</p>` + geldWoordenlijst(g);
+    el.innerHTML = kop + `<p class="leeg">Nog geen register. Vraag Birdy: “maak het financieel overzicht aan” (of draai <code>financien.py maak</code>).</p>` + geldWoordenlijst(g);
     return;
   }
-  const t = g.totalen, h = g.hypotheek, v = g.verrekening;
-  const cats = Object.entries(g.per_categorie || {});
-  const catTot = cats.reduce((a, [, n]) => a + n, 0) || 1;
-  const kleuren = ['#7fbfa6', '#d9a44e', '#8ab4d8', '#b39ddb', '#e07a6a', '#f2a1c2', '#5b6570'];
-  let html = `<div class="geld-kop"><h2>💶 Geld</h2><span class="notitie">stand ${esc(g.vandaag || '')} · per maand · tik op een post voor details</span>
-    ${g.link ? `<a href="${esc(g.link)}" target="_blank" rel="noopener">📄 Sheet openen</a>` : ''}
-    <button class="klein" onclick="geldPlus()">＋ toevoegen</button>
-    <button class="klein" onclick="geldLaad(true).then(renderGeld)">↻ vernieuwen</button>
-    <button class="klein" onclick="GELDPIN=null;try{sessionStorage.removeItem('birdy-geld-pin')}catch(e){};renderGeld()">🔒 sluiten</button></div>`;
-  html += '<div class="geld-grid">';
-  // 1. vaste lasten + inkomen, met filter op "hoort bij" (pot / persoon) en verdeling per rekening
-  const lastenAlle = g.vaste_lasten || [];
-  const pol = g.polissen || [];
+  el.innerHTML = kop + (GELDSUB === 'verbeteren' ? geldVerbeteren(g) : geldOverzicht(g));
+}
+const KLEUREN_GELD = ['#7fbfa6', '#d9a44e', '#8ab4d8', '#b39ddb', '#e07a6a', '#f2a1c2', '#5b6570'];
+function kleurBlok(kleur){ return `<i class="init" style="background:${kleur};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>`; }
+function geldOverzicht(g){
+  const t = g.totalen, h = g.hypotheek, v = g.verrekening, kleuren = KLEUREN_GELD;
+  let html = '<div class="geld-grid">';
+  // ── rij 1, kaart 1: vaste lasten (filter per persoon + verdeling per rekening) ──
+  const lastenAlle = g.vaste_lasten || [], pol = g.polissen || [];
   const wieOpties = ['alles', 'gezamenlijk', ...new Set([...lastenAlle, ...pol].map(x => x.hoort_bij).filter(w => w && w !== 'gezamenlijk'))];
   if (!wieOpties.includes(GELDWIE)) GELDWIE = 'alles';
   const kies = x => GELDWIE === 'alles' || x.hoort_bij === GELDWIE;
@@ -1509,22 +1513,20 @@ async function renderGeld(){
   const catTotF = catsL.reduce((a, [, n]) => a + n, 0) || 1;
   const polPm = polF.reduce((a, p) => a + p.per_maand, 0);
   const vastF = lasten.reduce((a, l) => a + l.per_maand, 0) + polPm + hypF;
-  const perRek = {};
-  lastenAlle.forEach(l => { perRek[l.betaald_van] = (perRek[l.betaald_van] || 0) + l.per_maand; });
-  pol.forEach(p => { perRek[p.betaald_van] = (perRek[p.betaald_van] || 0) + p.per_maand; });
+  const perRek = {}, perWie = {};
+  lastenAlle.forEach(l => { perRek[l.betaald_van] = (perRek[l.betaald_van] || 0) + l.per_maand; perWie[l.hoort_bij] = (perWie[l.hoort_bij] || 0) + l.per_maand; });
+  pol.forEach(p => { perRek[p.betaald_van] = (perRek[p.betaald_van] || 0) + p.per_maand; perWie[p.hoort_bij] = (perWie[p.hoort_bij] || 0) + p.per_maand; });
   (h.delen || []).forEach(d => { const k = d.betaald_van || 'hypotheek (vul “Betaald van” in de Sheet in)'; perRek[k] = (perRek[k] || 0) + d.maandlast; });
-  const perWie = {};
-  lastenAlle.forEach(l => { perWie[l.hoort_bij] = (perWie[l.hoort_bij] || 0) + l.per_maand; });
-  pol.forEach(p => { perWie[p.hoort_bij] = (perWie[p.hoort_bij] || 0) + p.per_maand; });
   perWie['gezamenlijk'] = (perWie['gezamenlijk'] || 0) + h.maandlast;
   html += `<div class="panel"><div class="kaartkop"><span class="ico">📉</span><h2>Vaste lasten</h2></div>
     <div class="fchips" style="margin:.1rem 0 .5rem">${wieOpties.map(w => `<button class="fchip${GELDWIE === w ? ' actief' : ''}" onclick="GELDWIE='${esc(w)}';renderGeld()">${w === 'gezamenlijk' ? 'de pot' : esc(w)}</button>`).join('')}</div>
     <div class="geld-groot">${euro(vastF)}<small>per maand${GELDWIE === 'alles' ? '' : ' · ' + (GELDWIE === 'gezamenlijk' ? 'van de pot' : 'van ' + esc(GELDWIE))}</small></div>
     <div class="geld-balk">${catsL.map(([c, n], i) => `<i style="width:${(n / catTotF * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(c)}"></i>`).join('')}</div>
-    ${catsL.map(([c, n], i) => `<div class="geld-rij klik" onclick="geldToggle('cat-${i}')"><span><i class="init" style="background:${kleuren[i % kleuren.length]};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>${esc(c)} <small>▾</small></span><b>${euro(n)}</b></div>
+    ${catsL.map(([c, n], i) => `<div class="geld-rij klik" onclick="geldToggle('cat-${i}')"><span>${kleurBlok(kleuren[i % kleuren.length])}${esc(c)} <small>▾</small></span><b>${euro(n)}</b></div>
       <div class="geld-detail" id="gd-cat-${i}" hidden>${lasten.filter(l => l.categorie === c).map((l, n) => geldRij(l, 'last', 'c' + i + '-' + n)).join('')}</div>`).join('')}
     <div class="geld-rij"><span>Polissen</span><b>${euro(polPm)}</b></div>
     ${hypF ? `<div class="geld-rij"><span>Hypotheek</span><b>${euro(hypF)}</b></div>` : ''}
+    ${t.in_pm && GELDWIE !== 'Jaap' ? `<div class="geld-rij"><span>Komt structureel terug <small>· ${esc((g.constructies || []).filter(c => c.in_pm).map(c => c.naam).join(', '))}</small></span><b style="color:var(--accent)">− ${euro(t.in_pm)}</b></div>` : ''}
     <h4 style="margin-top:.7rem">Wie betaalt, van wie is het</h4>
     <div class="geld-rij klik" onclick="geldToggle('rek')"><span>Per rekening <small>▾</small></span></div>
     <div class="geld-detail" id="gd-rek" hidden>${Object.entries(perRek).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div class="geld-rij"><span>${esc(k)}</span><b>${euro(n)}</b></div>`).join('')}</div>
@@ -1532,34 +1534,54 @@ async function renderGeld(){
     <div class="geld-detail" id="gd-wie" hidden>${Object.entries(perWie).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div class="geld-rij"><span>${k === 'gezamenlijk' ? 'de pot (gezamenlijk)' : esc(k)}</span><b>${euro(n)}</b></div>`).join('')}</div>
     ${geldUitlegKnop(g, 'vaste lasten', 'Leg in gewone taal uit waar ons geld elke maand naartoe gaat, wat van de pot is en wat van ieder apart, en wat het grootste aandeel is.')}
   </div>`;
-  // 1b. inkomen, variabele budgetten en wat er overblijft
-  const variabel = g.variabel || [];
-  html += `<div class="panel"><div class="kaartkop"><span class="ico">💰</span><h2>Inkomen & budget</h2></div>
-    ${t.inkomen_pm ? `<div class="geld-rij klik" onclick="geldToggle('inkomsten')"><span>Inkomen (${(g.inkomsten || []).length} bronnen) <small>▾</small></span><b>${euro(t.inkomen_pm)}</b></div>
-    <div class="geld-detail" id="gd-inkomsten" hidden>${(g.inkomsten || []).map((i, n) => geldRij(i, 'inkomst', n)).join('')}</div>` : '<p class="leeg">nog geen inkomsten ingevuld (tab Inkomsten)</p>'}
-    <div class="geld-rij"><span>Vaste lasten <small>· incl. hypotheek, polissen en constructies</small></span><b>− ${euro(t.vast_pm)}</b></div>
-    ${t.in_pm ? `<div class="geld-rij"><span>Komt structureel terug <small>· ${esc((g.constructies || []).filter(c => c.in_pm).map(c => c.naam).join(', '))}</small></span><b style="color:var(--accent)">+ ${euro(t.in_pm)}</b></div>` : ''}
-    <div class="geld-rij klik" onclick="geldToggle('variabel')"><span>Budget variabele kosten (${variabel.length}) <small>▾ · zonder sparen</small></span><b>− ${euro(t.variabel_pm || 0)}</b></div>
-    <div class="geld-detail" id="gd-variabel" hidden>${variabel.length ? variabel.map((x, n) => geldRij(x, 'variabel', n)).join('') : '<p class="notitie">Nog geen budgetten. Zet in de Sheet (tab Variabele kosten) wat per maand wisselt: boodschappen, uitjes, kleding, auto…</p>'}</div>
-    <div class="geld-rij"><span><b>Blijft over per maand</b> <small>· structureel, zonder incidenteel</small></span><b style="color:${(t.over_pm || 0) >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_pm || 0)}</b></div>
-    ${t.sparen_pm ? `<div class="geld-rij"><span>Waarvan bewust naar sparen & beleggen <small>· keuze, geen kostenpost</small></span><b>${euro(t.sparen_pm)}</b></div>` : ''}
-    ${!variabel.length ? '<p class="notitie">Zonder budgetten voor variabele kosten is "blijft over" te rooskleurig.</p>' : ''}
-    ${(g.incidenteel || []).length ? `<h4 style="margin-top:.8rem">Incidenteel (per jaar, niet in het maandbeeld)</h4>
-      <div class="geld-rij klik" onclick="geldToggle('inc-v')"><span>Voorspelbaar <small>▾ · bonus, vakantiegeld, vakantie…</small></span><b>+ ${euro(t.incidenteel_in_jaar)} <small>/ − ${euro(t.incidenteel_uit_jaar)}</small></b></div>
-      <div class="geld-detail" id="gd-inc-v" hidden>${g.incidenteel.filter(i => i.voorspelbaar).map(i => `<div class="geld-rij"><small>${esc(i.wanneer)}</small><span>${esc(i.naam)} <small>· ${esc(i.rekening)} · ${esc(i.hoort_bij)}${i.notitie ? ' · ' + esc(i.notitie) : ''}</small></span><b>${i.soort === 'inkomst' ? '+' : '−'} ${euro(i.bedrag)}</b></div>`).join('') || '<p class="leeg">geen</p>'}</div>
-      <div class="geld-rij"><span>Reserveer per maand voor voorspelbare pieken</span><b style="color:${(t.reservering_pm || 0) <= 0 ? 'var(--accent)' : 'var(--amber)'}">${t.reservering_pm > 0 ? '− ' : '+ '}${euro(Math.abs(t.reservering_pm || 0))}</b></div>
-      <div class="geld-rij"><span><b>Blijft over incl. reservering</b></span><b style="color:${(t.over_na_reservering_pm || 0) >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_na_reservering_pm || 0)}</b></div>
-      ${g.incidenteel.some(i => !i.voorspelbaar) ? `<div class="geld-rij klik" onclick="geldToggle('inc-o')"><span>Onvoorspelbaar <small>▾ · aanslagen, reparaties</small></span><b>${euro(g.incidenteel.filter(i => !i.voorspelbaar && i.soort === 'uitgave').reduce((a, i) => a + i.bedrag, 0))}</b></div>
-      <div class="geld-detail" id="gd-inc-o" hidden>${g.incidenteel.filter(i => !i.voorspelbaar).map(i => `<div class="geld-rij"><small>${esc(i.wanneer)}</small><span>${esc(i.naam)} <small>· ${esc(i.rekening)}${i.notitie ? ' · ' + esc(i.notitie) : ''}</small></span><b>${i.soort === 'inkomst' ? '+' : '−'} ${euro(i.bedrag)}</b></div>`).join('')}</div>` : ''}` : ''}
-    ${geldUitlegKnop(g, 'budget', 'Leg in gewone taal uit wat er van ons inkomen overblijft na de vaste lasten en de budgetten, en waar we op kunnen sturen.')}
+  // ── kaart 2: variabele maar voorspelbare lasten (budgetten) ──
+  const variabel = (g.variabel || []);
+  const sparen = variabel.filter(x => /spaar|sparen|beleg|pensioen/i.test(x.naam));
+  const budget = variabel.filter(x => !sparen.includes(x));
+  const budTot = budget.reduce((a, x) => a + x.per_maand, 0) || 1;
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🛒</span><h2>Variabele lasten</h2></div>
+    <p class="notitie" style="margin-top:-.3rem">Voorspelbaar maar wisselend: budget per maand</p>
+    <div class="geld-groot">${euro(t.variabel_pm || 0)}<small>per maand</small></div>
+    <div class="geld-balk">${budget.map((x, i) => `<i style="width:${(x.per_maand / budTot * 100).toFixed(1)}%;background:${kleuren[i % kleuren.length]}" title="${esc(x.naam)}"></i>`).join('')}</div>
+    ${budget.length ? budget.map((x, n) => `<div class="geld-rij klik" onclick="geldToggle('variabel-${n}')"><span>${kleurBlok(kleuren[n % kleuren.length])}${esc(x.naam)} <small>▾ · ${esc(x.betaald_van)}${x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}</small></span><b>${euro(x.per_maand)}</b></div><div class="geld-detail" id="gd-variabel-${n}" hidden>${geldRijDetails(x, 'variabel')}</div>`).join('')
+      : '<p class="notitie">Nog geen budgetten. Zet in de Sheet (tab Variabele kosten) wat per maand wisselt: boodschappen, uitjes, kleding, auto…</p>'}
+    ${sparen.length ? '<h4 style="margin-top:.7rem">Bewust opzij (keuze, geen kostenpost)</h4>' + sparen.map(x => `<div class="geld-rij"><span>${esc(x.naam)} <small>· ${esc(x.betaald_van)}</small></span><b>${euro(x.per_maand)}</b></div>`).join('') : ''}
+    ${geldUitlegKnop(g, 'budget', 'Leg in gewone taal uit hoe onze variabele kosten zich verhouden tot de vaste lasten en waar we op kunnen sturen.')}
   </div>`;
-  // 2. hypotheek
+  // ── kaart 3: incidenteel maar jaarlijks ──
+  const inc = g.incidenteel || [];
+  const incV = inc.filter(i => i.voorspelbaar), incO = inc.filter(i => !i.voorspelbaar);
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">📆</span><h2>Incidenteel</h2></div>
+    <p class="notitie" style="margin-top:-.3rem">Jaarlijks of eenmalig, niet in het maandbeeld</p>
+    ${incV.length ? `<div class="geld-groot">${t.reservering_pm > 0 ? '− ' : '+ '}${euro(Math.abs(t.reservering_pm || 0))}<small>per maand ${t.reservering_pm > 0 ? 'opzij zetten' : 'extra, uitgesmeerd over het jaar'}</small></div>
+      <div class="geld-rij"><span>Voorspelbaar in per jaar</span><b style="color:var(--accent)">+ ${euro(t.incidenteel_in_jaar)}</b></div>
+      <div class="geld-rij"><span>Voorspelbaar uit per jaar</span><b>− ${euro(t.incidenteel_uit_jaar)}</b></div>
+      ${incV.map((i, n) => `<div class="geld-rij klik" onclick="geldToggle('inc-${n}')"><span><small>${esc(i.wanneer)}</small> ${esc(i.naam)} <small>▾</small></span><b style="${i.soort === 'inkomst' ? 'color:var(--accent)' : ''}">${i.soort === 'inkomst' ? '+' : '−'} ${euro(i.bedrag)}</b></div><div class="geld-detail" id="gd-inc-${n}" hidden><div class="geld-rij"><span>Rekening</span><b style="font-weight:500">${esc(i.rekening)}</b></div><div class="geld-rij"><span>Hoort bij</span><b style="font-weight:500">${esc(i.hoort_bij)}</b></div>${i.notitie ? `<p class="notitie">${esc(i.notitie)}</p>` : ''}</div>`).join('')}`
+      : '<p class="notitie">Nog niets ingevuld (tab Incidenteel): bonus, vakantiegeld, vakantie, aanslagen…</p>'}
+    ${incO.length ? `<h4 style="margin-top:.7rem">Onvoorspelbaar (reserve)</h4>${incO.map(i => `<div class="geld-rij"><span><small>${esc(i.wanneer)}</small> ${esc(i.naam)}${i.notitie ? ` <small>· ${esc(i.notitie)}</small>` : ''}</span><b>${i.soort === 'inkomst' ? '+' : '−'} ${euro(i.bedrag)}</b></div>`).join('')}` : ''}
+  </div>`;
+  // ── kaart 4: overzicht (rechts) ──
+  html += `<div class="panel" style="border-color:var(--accent)"><div class="kaartkop"><span class="ico">🧮</span><h2>Overzicht</h2></div>
+    <div class="geld-rij klik" onclick="geldToggle('inkomsten')"><span>Inkomen <small>▾ · ${(g.inkomsten || []).length} bronnen</small></span><b style="color:var(--accent)">+ ${euro(t.inkomen_pm)}</b></div>
+    <div class="geld-detail" id="gd-inkomsten" hidden>${(g.inkomsten || []).map((i, n) => geldRij(i, 'inkomst', n)).join('') || '<p class="notitie">tab Inkomsten is leeg</p>'}</div>
+    <div class="geld-rij"><span>Vaste lasten <small>· na wat terugkomt</small></span><b>− ${euro(t.netto_pm)}</b></div>
+    <div class="geld-rij"><span>Variabele lasten <small>· budget</small></span><b>− ${euro(t.variabel_pm || 0)}</b></div>
+    <div class="geld-rij"><span><b>Structureel per maand</b></span><b style="color:${(t.over_pm || 0) >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_pm || 0)}</b></div>
+    <div class="geld-rij"><span>Incidenteel, uitgesmeerd <small>· bonus, vakantiegeld, vakantie</small></span><b style="color:${(t.reservering_pm || 0) <= 0 ? 'var(--accent)' : 'var(--amber)'}">${t.reservering_pm > 0 ? '− ' : '+ '}${euro(Math.abs(t.reservering_pm || 0))}</b></div>
+    <div class="geld-groot" style="margin-top:.4rem;color:${(t.over_na_reservering_pm || 0) >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro(t.over_na_reservering_pm || 0)}<small>per maand over, jaargemiddelde</small></div>
+    ${t.sparen_pm ? `<div class="geld-rij"><span>Waarvan bewust naar sparen & beleggen</span><b>${euro(t.sparen_pm)}</b></div>
+    <div class="geld-rij"><span><b>Vrij te besteden</b></span><b style="color:${((t.over_na_reservering_pm || 0) - t.sparen_pm) >= 0 ? 'var(--accent)' : 'var(--rood)'}">${euro((t.over_na_reservering_pm || 0) - t.sparen_pm)}</b></div>` : ''}
+    <p class="notitie" style="margin-top:.6rem">Yvettes eigen rekening zit hier alleen in als haar bijdrage aan de pot.</p>
+    ${geldUitlegKnop(g, 'overzicht', 'Leg in gewone taal uit wat er van ons inkomen overblijft na vaste lasten, budgetten en de jaarlijkse pieken, en waar we op kunnen sturen.')}
+  </div>`;
+  html += '</div><div class="geld-grid" style="margin-top:.9rem">';
+  // ── rij 2, kaart 1: hypotheek ──
   const rentePct = h.maandlast ? Math.round(h.rente / h.maandlast * 100) : 0;
   html += `<div class="panel"><div class="kaartkop"><span class="ico">🏠</span><h2>Hypotheek</h2></div>
     ${h.delen.length ? `<div class="geld-groot">${euro(h.maandlast)}<small>per maand</small></div>` +
     (h.bekend ? `<div class="geld-balk"><i style="width:${rentePct}%;background:var(--rood)" title="rente"></i><i style="width:${100 - rentePct}%;background:var(--accent)" title="aflossing"></i></div>
-    <div class="geld-rij"><span><i class="init" style="background:var(--rood);width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>Rente (kost geld)</span><b>${euro(h.rente)}</b></div>
-    <div class="geld-rij"><span><i class="init" style="background:var(--accent);width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>Aflossing (bouwt bezit op)</span><b>${euro(h.aflossing)}</b></div>
+    <div class="geld-rij"><span>${kleurBlok('var(--rood)')}Rente (kost geld)</span><b>${euro(h.rente)}</b></div>
+    <div class="geld-rij"><span>${kleurBlok('var(--accent)')}Aflossing (bouwt bezit op)</span><b>${euro(h.aflossing)}</b></div>
     <div class="geld-rij"><span>Nog te betalen (restschuld)</span><b>${euro(h.restschuld)}</b></div>
     ${h.hoofdsom ? `<div class="geld-rij"><span>Al afgelost</span><b>${euro(h.hoofdsom - h.restschuld)} <small>(${Math.round((h.hoofdsom - h.restschuld) / h.hoofdsom * 100)}%)</small></b></div>` : ''}`
     : `<div class="geld-uitleg" style="border-color:var(--dim);background:rgba(255,255,255,.04)">De verdeling rente/aflossing en de restschuld verschijnen zodra in de Sheet (tab Hypotheek) hoofdsom, restschuld, rente en rentevaste periode zijn ingevuld — die staan op de jaaropgave van de hypotheek.</div>`) +
@@ -1567,30 +1589,45 @@ async function renderGeld(){
     : '<p class="leeg">nog geen hypotheek ingevuld</p>'}
     ${geldUitlegKnop(g, 'hypotheek', 'Leg in gewone taal uit hoe onze hypotheek werkt: wat rente en aflossing zijn, wat er van ons maandbedrag waarheen gaat, en wat er gebeurt als de rentevaste periode afloopt.')}
   </div>`;
-  // 3. polissen
-  html += `<div class="panel"><div class="kaartkop"><span class="ico">🛡️</span><h2>Polissen</h2><b>${(g.polissen || []).length || ''}</b></div>
-    ${(g.polissen || []).map((p, n) => geldRij(p, 'polis', n)).join('') || '<p class="leeg">nog geen polissen ingevuld</p>'}
+  // ── kaart 2: polissen ──
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🛡️</span><h2>Polissen</h2><b>${pol.length || ''}</b></div>
+    ${pol.map((p, n) => geldRij(p, 'polis', n)).join('') || '<p class="leeg">nog geen polissen ingevuld</p>'}
     ${geldUitlegKnop(g, 'polissen', 'Leg in gewone taal uit welke verzekeringen we hebben, waar ze voor zijn, wat eigen risico betekent en waar we op moeten letten bij opzeggen.')}
   </div>`;
-  // 4. constructies + regelingen
-  const regelingen = (g.inkomsten || []).filter(i => i.regeling || i.uitleg);
-  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies & regelingen</h2></div>
-    ${(g.constructies || []).map((c, n) => `<div class="geld-rij klik" onclick="geldToggle('con-${n}')"><span>${esc(c.naam)} <small>▾</small><br><small>uit ${euro(c.uit_pm)} · terug ${euro(c.in_pm)} per maand</small></span><b style="color:${c.netto_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${c.netto_pm >= 0 ? '+' : '−'} ${euro(Math.abs(c.netto_pm))}</b></div>
-      <div class="geld-detail" id="gd-con-${n}" hidden>${c.uitleg ? `<div class="geld-uitleg">${esc(c.uitleg)}</div>` : ''}${c.stromen.map(st => `<div class="geld-rij"><span>${st.richting === 'in' ? '⬅ komt binnen' : '➡ gaat weg'} <small>· ${esc(st.van)} → ${esc(st.naar)} · hoort bij ${esc(st.hoort_bij)}</small></span><b>${euro2(st.bedrag)}<small> /${esc(st.frequentie)}</small></b></div>`).join('')}</div>`).join('') || ''}
-    ${regelingen.length ? '<h4 style="margin-top:.6rem">Toeslagen & regelingen</h4>' + regelingen.map((i, n) => `<div class="geld-rij klik" onclick="geldToggle('reg-${n}')"><span>${esc(i.regeling || i.naam)} <small>▾ · ${esc(i.komt_binnen_op)} · hoort bij ${esc(i.hoort_bij)}</small></span><b>${euro(i.per_maand)}<small> /mnd</small></b></div>
-      <div class="geld-detail" id="gd-reg-${n}" hidden><div class="geld-uitleg">${esc(i.uitleg)}</div>${i.notitie ? `<p class="notitie">${esc(i.notitie)}</p>` : ''}</div>`).join('') : ''}
+  // ── kaart 3: abonnementen & contracten (met start/eind/overstap) ──
+  const abo = lastenAlle.filter(l => /abonnement|telecom|uitjes|streaming|sport|contract|media/i.test(l.categorie) || l.overstapdatum);
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔔</span><h2>Abonnementen & contracten</h2><b>${abo.length || ''}</b></div>
+    <p class="notitie" style="margin-top:-.3rem">Met looptijd, opzegtermijn en overstapmoment</p>
+    ${abo.map((l, n) => geldRij(l, 'abo', n)).join('') || '<p class="leeg">geen abonnementen met datums; vul Startdatum/Einddatum/Overstapdatum in de Sheet in</p>'}
+    ${geldUitlegKnop(g, 'abonnementen', 'Kijk naar onze abonnementen en contracten: welke lopen af, waar zit een opzegtermijn of overstapmoment, en wat kunnen we opzeggen of versimpelen?')}
+  </div>`;
+  // ── kaart 4: constructies & verrekeningen (structureel) ──
+  const regelingen = (g.inkomsten || []).filter(i => i.regeling);
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies & verrekeningen</h2></div>
+    ${(g.constructies || []).map((c, n) => `<div class="geld-rij klik" onclick="geldToggle('con-${n}')"><span>${esc(c.naam)} <small>▾ · uit ${euro(c.uit_pm)} · terug ${euro(c.in_pm)}</small></span><b style="color:${c.netto_pm >= 0 ? 'var(--accent)' : 'var(--rood)'}">${c.netto_pm >= 0 ? '+' : '−'} ${euro(Math.abs(c.netto_pm))}</b></div>
+      <div class="geld-detail" id="gd-con-${n}" hidden>${c.uitleg ? `<div class="geld-uitleg">${esc(c.uitleg)}</div>` : ''}${c.stromen.map(st => `<div class="geld-rij"><span>${st.richting === 'in' ? '⬅ komt binnen' : '➡ gaat weg'} <small>· ${esc(st.van)} → ${esc(st.naar)}</small></span><b>${euro2(st.bedrag)}<small> /${esc(st.frequentie)}</small></b></div>`).join('')}</div>`).join('') || ''}
+    ${regelingen.length ? '<h4 style="margin-top:.6rem">Toeslagen & regelingen</h4>' + regelingen.map((i, n) => `<div class="geld-rij klik" onclick="geldToggle('reg-${n}')"><span>${esc(i.regeling || i.naam)} <small>▾ · ${esc(i.komt_binnen_op)}</small></span><b>${euro(i.per_maand)}<small> /mnd</small></b></div><div class="geld-detail" id="gd-reg-${n}" hidden><div class="geld-uitleg">${esc(i.uitleg)}</div>${i.notitie ? `<p class="notitie">${esc(i.notitie)}</p>` : ''}</div>`).join('') : ''}
     ${(g.inleg || []).length ? '<h4 style="margin-top:.6rem">Afspraak: inleg op de pot</h4>' + g.inleg.map(c => `<div class="geld-rij"><span>${esc(c.naam)} <small>· ${esc((c.stromen[0] || {}).uitleg || '')}</small></span><b>${euro(c.uit_pm)}<small> /mnd</small></b></div>`).join('') : ''}
     ${(g.via_inleg || []).length ? `<div class="geld-rij klik" onclick="geldToggle('via')"><span>Zit al in de inleg verrekend <small>▾ · ${g.via_inleg.length} posten</small></span></div>
       <div class="geld-detail" id="gd-via" hidden><p class="notitie">Deze posten lopen privé maar zijn van de pot; de inleg is daarop afgestemd, dus ze tellen niet mee bij het verrekenen.</p>${g.via_inleg.map(x => `<div class="geld-rij"><span>${esc(x.wat)} <small>· ${esc(x.tekst)}</small></span><b>${x.richting === 'in' ? '+' : '−'} ${euro2(x.bedrag)}</b></div>`).join('')}</div>` : ''}
-    ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen, toeslagen en constructies werken, en wat de inleg-afspraak inhoudt.')}
+    <h4 style="margin-top:.7rem">Structureel te verrekenen</h4>
+    <div class="geld-saldo" style="font-weight:500">${esc(v.tekst || 'in balans')}</div>
+    ${(v.regels || []).slice(0, 8).map(r => `<div class="geld-rij"><span>${esc(r.wat)} <small>· ${esc(r.tekst)}</small></span><b>${r.richting === 'van_pot' ? '+' : '−'} ${euro2(r.bedrag)}</b></div>`).join('')}
+    ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen, toeslagen en constructies werken, wat de inleg-afspraak inhoudt en wat er nog te verrekenen valt.')}
   </div>`;
-  // 4b. besparingsvoorstellen: uit de Sheet + via het dashboard toegevoegd
+  html += '</div>' + geldWoordenlijst(g);
+  return html;
+}
+function geldVerbeteren(g){
+  const v = g.verrekening;
+  let html = '<div class="geld-grid" style="grid-template-columns:repeat(auto-fit, minmax(340px, 1fr))">';
+  // ── besparingsvoorstellen ──
   const bespAlle = [...(g.besparingen || []), ...((BESPAR || {}).items || [])];
   const bespOpen = bespAlle.filter(b => !['gedaan', 'afgewezen'].includes(b.status));
   const potentie = bespOpen.reduce((a, b) => a + (b.per_maand || 0), 0);
   const statusKl = { idee: 'var(--dim)', onderzoeken: 'var(--amber)', gepland: 'var(--accent)', gedaan: 'var(--accent)', afgewezen: 'var(--rood)' };
-  html += `<div class="panel"><div class="kaartkop"><span class="ico">💡</span><h2>Besparingen</h2><b>${bespOpen.length || ''}</b></div>
-    ${potentie ? `<div class="geld-groot">${euro(potentie)}<small>per maand mogelijk (${bespOpen.length} open voorstellen)</small></div>` : '<p class="notitie">Ideeën om goedkoper uit te zijn; zet ze om in een actie als je ermee aan de slag wilt.</p>'}
+  html += `<div class="panel"><div class="kaartkop"><span class="ico">💡</span><h2>Verbeterpunten & besparingen</h2><b>${bespOpen.length || ''}</b></div>
+    ${potentie ? `<div class="geld-groot">${euro(potentie)}<small>per maand mogelijk (${bespOpen.length} open)</small></div>` : '<p class="notitie">Ideeën om goedkoper of slimmer uit te zijn; zet ze om in een actie als je ermee aan de slag wilt.</p>'}
     ${bespAlle.map((b, n) => `<div class="geld-rij klik" onclick="geldToggle('besp-${n}')"><span>${esc(b.voorstel)} <small>▾ · <i style="font-style:normal;color:${statusKl[b.status] || 'var(--dim)'}">${esc(b.status)}</i>${b.categorie ? ' · ' + esc(b.categorie) : ''}</small></span><b>${b.per_maand ? euro(b.per_maand) + '<small> /mnd</small>' : ''}</b></div>
       <div class="geld-detail" id="gd-besp-${n}" hidden>${b.notitie ? `<p class="notitie">${esc(b.notitie)}</p>` : ''}<p class="notitie">bron: ${esc(b.bron || '?')}${b.datum ? ' · ' + esc(b.datum) : ''}${b.uit === 'sheet' ? ' · uit de Sheet' : ''}</p>
         <div style="display:flex;gap:.4rem;flex-wrap:wrap">${!['gedaan', 'afgewezen'].includes(b.status) ? `<button class="aknop" onclick="event.stopPropagation();snelActie(${JSON.stringify('Besparing: ' + b.voorstel)}, '', this)">⚡ Maak er een actie van</button>` : ''}
@@ -1598,7 +1635,7 @@ async function renderGeld(){
     <div class="vr-form" style="margin-top:.6rem"><input id="bpVoorstel" placeholder="nieuw voorstel, bijv. 'Wellis stoppen'" maxlength="160" style="grid-column:1 / -1"><input id="bpBedrag" type="number" inputmode="decimal" step="0.01" min="0" placeholder="€ per maand"><input id="bpCat" placeholder="categorie" maxlength="40"><button class="aknop" onclick="bespToevoegen()">＋ Voorstel toevoegen</button></div>
     ${geldUitlegKnop(g, 'besparingen', 'Kijk met onze cijfers (financien.py toon) naar de vaste lasten, polissen en abonnementen: waar kunnen we besparen of overstappen? Geef concrete voorstellen als regels voor tabblad Besparingen.')}
   </div>`;
-  // 5. verrekenen (pot-model: losse posten + structureel uit het register)
+  // ── verrekenen (losse posten + afrekenen) ──
   const vr = VERREKEN || { posten: [], afrekeningen: [] };
   const open = vr.posten.filter(p => !p.verrekend);
   const saldoLos = {};
@@ -1617,13 +1654,11 @@ async function renderGeld(){
       : '<p class="leeg">geen open posten</p>'}
     ${open.length ? `<div class="geld-saldo">${Object.entries(saldoLos).map(([w, b]) => b >= 0 ? `pot → ${esc(w)}: ${euro2(b)}` : `${esc(w)} → pot: ${euro2(-b)}`).join(' · ')}</div>
       <button class="blikknop" onclick="vrAfrekenen()">✅ Afrekenen (${open.length} ${open.length === 1 ? 'post' : 'posten'})</button>` : ''}
-    <h4 style="margin-top:.8rem">Structureel, per maand</h4>
+    ${(vr.afrekeningen || []).length ? '<h4 style="margin-top:.8rem">Eerdere afrekeningen</h4>' + vr.afrekeningen.slice(0, 6).map(a => `<div class="geld-rij"><small>${esc(a.datum.slice(5))}</small><span>${esc(a.tekst)} <small>· ${a.aantal} posten</small></span></div>`).join('') : ''}
+    <h4 style="margin-top:.8rem">Structureel (uit het register)</h4>
     <div class="geld-saldo" style="font-weight:500">${esc(v.tekst || 'in balans')}</div>
-    ${(v.regels || []).slice(0, 8).map(r => `<div class="geld-rij"><span>${esc(r.wat)} <small>· ${esc(r.tekst)}</small></span><b>${r.richting === 'van_pot' ? '+' : '−'} ${euro2(r.bedrag)}</b></div>`).join('')}
-    ${(vr.afrekeningen || []).length ? '<h4 style="margin-top:.8rem">Eerdere afrekeningen</h4>' + vr.afrekeningen.slice(0, 4).map(a => `<div class="geld-rij"><small>${esc(a.datum.slice(5))}</small><span>${esc(a.tekst)} <small>· ${a.aantal} posten</small></span></div>`).join('') : ''}
   </div>`;
-  html += '</div>' + geldWoordenlijst(g);
-  el.innerHTML = html;
+  return html + '</div>';
 }
 function geldToggle(id){ const d = document.getElementById('gd-' + id); if (d) d.hidden = !d.hidden; }
 // één post als open-te-klikken rij met details: rekening, wie, frequentie, betaaldag, opzegtermijn, document…
@@ -1635,6 +1670,10 @@ function geldRij(x, soort, n){
             : soort === 'hypotheek' ? `${esc(x.verstrekker || '')}${x.vorm ? ' · ' + esc(x.vorm) : ''}${x.rente_pct ? ' · ' + x.rente_pct + '%' : ''}`
             : `${esc(x.betaald_van)}${x.hoort_bij && x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}${soort === 'polis' && x.verzekeraar ? ' · ' + esc(x.verzekeraar) : ''}${x.frequentie && x.frequentie !== 'maand' ? ' · ' + euro2(x.bedrag) + ' per ' + esc(x.frequentie) : ''}`;
   const badge = (x.dagen !== null && x.dagen !== undefined) ? `<small style="${x.dagen < 45 ? 'color:var(--amber)' : ''}">${x.dagen < 0 ? 'verlopen' : 'tot ' + esc(x.einddatum)}</small>` : '';
+  return `<div class="geld-rij klik" onclick="geldToggle('${id}')"><span>${esc(naam)} <small>▾ · ${sub}${soort === 'abo' && x.overstapdatum ? ' · overstap ' + esc(x.overstapdatum) : ''}</small></span>${badge}<b>${bedragTekst}</b></div>
+    <div class="geld-detail" id="gd-${id}" hidden>${geldRijDetails(x, soort)}</div>`;
+}
+function geldRijDetails(x, soort){
   const det = [];
   const rij = (k, v) => v !== undefined && v !== null && v !== '' && det.push(`<div class="geld-rij"><span>${k}</span><b style="font-weight:500">${v}</b></div>`);
   if (soort === 'hypotheek'){
@@ -1657,8 +1696,7 @@ function geldRij(x, soort, n){
   rij('Document', x.document ? (/^https?:/.test(x.document) ? `<a href="${esc(x.document)}" target="_blank" rel="noopener">📄 openen</a>` : esc(x.document)) : '');
   if (x.uitleg && soort === 'inkomst') det.push(`<div class="geld-uitleg">${esc(x.uitleg)}</div>`);
   if (x.notitie) det.push(`<p class="notitie">${esc(x.notitie)}</p>`);
-  return `<div class="geld-rij klik" onclick="geldToggle('${id}')"><span>${esc(naam)} <small>▾ · ${sub}</small></span>${badge}<b>${bedragTekst}</b></div>
-    <div class="geld-detail" id="gd-${id}" hidden>${det.join('')}</div>`;
+  return det.join('');
 }
 function geldUitlegKnop(g, onderwerp, vraag){
   const u = (g.uitleg || {})[onderwerp];
