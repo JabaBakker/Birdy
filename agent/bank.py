@@ -14,7 +14,7 @@ import io
 import json
 import re
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, timedelta, datetime
 from pathlib import Path
 
 MAX_TX = 20000
@@ -122,7 +122,9 @@ def parse_ics_pdf(data: bytes, rekening_naam: str = "Creditcard") -> list[dict]:
     from pypdf import PdfReader
 
     MND = {"jan.": 1, "feb.": 2, "mrt.": 3, "apr.": 4, "mei": 5, "jun.": 6, "jul.": 7, "aug.": 8, "sep.": 9,
-           "okt.": 10, "nov.": 11, "dec.": 12}
+           "okt.": 10, "nov.": 11, "dec.": 12,
+           "januari": 1, "februari": 2, "maart": 3, "april": 4, "juni": 6, "juli": 7, "augustus": 8,
+           "september": 9, "oktober": 10, "november": 11, "december": 12}
     rd = PdfReader(io.BytesIO(data))
     tekst = "\n".join(p.extract_text() or "" for p in rd.pages)
     mj = re.search(r"Datum\s+ICS-klantnummer.*?\n\s*(\d{1,2}) (\w+\.?) (\d{4})", tekst, re.S)
@@ -137,6 +139,8 @@ def parse_ics_pdf(data: bytes, rekening_naam: str = "Creditcard") -> list[dict]:
         if not mnd:
             continue
         j = jaar - 1 if (afschrift_mnd and mnd > afschrift_mnd) else jaar
+        if date(j, mnd, dag) > date.today() + timedelta(days=7):  # vangnet: een afschrift ligt nooit in de toekomst
+            j -= 1
         oms = m.group(5)
         vv = re.search(r" (\d[\d.,]*) ([A-Z]{3})$", oms)
         if vv:
