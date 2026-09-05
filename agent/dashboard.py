@@ -152,9 +152,13 @@ class Dashboard:
         if self._geld is None or time.time() - self._geld_ts > 300:
             try:
                 self._geld = await asyncio.to_thread(financien.register)
-            except BaseException:
+                self._geld.pop("fout", None)
+            except BaseException as e:  # noqa: BLE001
                 log.warning("financieel register lezen mislukt", exc_info=True)
+                fout = "Google-koppeling verlopen of ingetrokken (token vernieuwen: scripts/google_vernieuw.sh)" \
+                    if "invalid_grant" in str(e) or "expired or revoked" in str(e) else f"Register lezen mislukt: {str(e)[:160]}"
                 self._geld = self._geld or {"beschikbaar": False, "link": "", "woordenlijst": financien.WOORDENLIJST}
+                self._geld = {**self._geld, "fout": fout}
             self._geld_ts = time.time()
         return self._geld
 

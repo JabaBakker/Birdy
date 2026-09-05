@@ -1494,7 +1494,9 @@ async function renderGeld(){
     <button class="klein" onclick="geldLaad(true).then(renderGeld)">↻</button>
     <button class="klein" onclick="GELDPIN=null;try{sessionStorage.removeItem('birdy-geld-pin')}catch(e){};renderGeld()">🔒</button></div>`;
   if (!g.beschikbaar){
-    el.innerHTML = kop + `<p class="leeg">Nog geen register. Vraag Birdy: “maak het financieel overzicht aan” (of draai <code>financien.py maak</code>).</p>` + geldWoordenlijst(g);
+    el.innerHTML = kop + (g.fout
+      ? `<p class="leeg" style="color:var(--amber)">⚠ ${esc(g.fout)}</p>`
+      : `<p class="leeg">Nog geen register. Vraag Birdy: “maak het financieel overzicht aan” (of draai <code>financien.py maak</code>).</p>`) + geldWoordenlijst(g);
     return;
   }
   el.innerHTML = kop + (GELDSUB === 'onderliggend' ? geldOnderliggend(g) : GELDSUB === 'verrekenen' ? geldVerrekenen(g) : geldOverzicht(g));
