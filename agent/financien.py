@@ -255,9 +255,20 @@ def _rijen(ws, kolommen: list[str]) -> list[dict]:
     return out
 
 
+ONBEKEND = "onbekend"
+
+
 def _wie(v) -> str:
     s = str(v or "").strip()
+    if s.lower() in ("onbekend", "?", "nog invullen", "n.t.b.", "ntb"):
+        return ONBEKEND
     return "gezamenlijk" if not s or s.lower() in ("gezamenlijk", "samen", "gedeeld", "beiden") else s
+
+
+def _controleren(*velden) -> bool:
+    """Aanname of placeholder? Dan krijgt de post op het dashboard een 'te controleren'-label."""
+    tekst = " ".join(str(v or "") for v in velden).lower()
+    return any(w in tekst for w in ("checken", "controleren", "aanname", "schatting", "placeholder", "onbekend", "niet in de export"))
 
 
 # ── Sheet aanmaken / lezen ───────────────────────────────────────────────────
@@ -362,6 +373,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "komt_binnen_op": _wie(r.get("Komt binnen op")), "ontvanger": eigenaar(r.get("Komt binnen op")),
             "hoort_bij": _wie(r.get("Hoort bij")), "notitie": str(r.get("Notitie") or ""),
             "herkenning": str(r.get("Herkenning") or ""), "verrekend_via": str(r.get("Verrekend via") or "").strip().lower(),
+            "controleren": _controleren(r.get("Notitie"), r.get("Komt binnen op")),
         })
         titel, tekst = regeling_uitleg(inkomsten[-1]["naam"], inkomsten[-1]["bedrag"], inkomsten[-1]["frequentie"],
                                        inkomsten[-1]["komt_binnen_op"])
@@ -386,6 +398,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "overstapdatum": _datum(r.get("Overstapdatum")).isoformat() if _datum(r.get("Overstapdatum")) else "",
             "overstap_dagen": (_datum(r.get("Overstapdatum")) - vandaag).days if _datum(r.get("Overstapdatum")) else None,
             "document": str(r.get("Document") or ""), "notitie": str(r.get("Notitie") or ""),
+            "controleren": _controleren(r.get("Notitie"), r.get("Betaald van")),
         })
     variabel = []
     for r in lees("Variabele kosten"):
@@ -394,7 +407,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "per_maand": per_maand(r.get("Budget"), r.get("Frequentie")),
             "betaald_van": _wie(r.get("Betaald van")), "betaler": eigenaar(r.get("Betaald van")),
             "hoort_bij": _wie(r.get("Hoort bij")), "herkenning": str(r.get("Herkenning") or ""),
-            "notitie": str(r.get("Notitie") or ""),
+            "notitie": str(r.get("Notitie") or ""), "controleren": _controleren(r.get("Notitie")),
         })
     incidenteel = []
     for r in lees("Incidenteel"):
@@ -438,6 +451,7 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
             "overstapdatum": _datum(r.get("Overstapdatum")).isoformat() if _datum(r.get("Overstapdatum")) else "",
             "overstap_dagen": (_datum(r.get("Overstapdatum")) - vandaag).days if _datum(r.get("Overstapdatum")) else None,
             "document": str(r.get("Document") or ""), "notitie": str(r.get("Notitie") or ""),
+            "controleren": _controleren(r.get("Notitie"), r.get("Betaald van")),
         })
 
     # hypotheek
@@ -502,15 +516,14 @@ def register(wb=None, vandaag: date | None = None, verdeling: dict | None = None
     # verrekening (pot-model): de gezamenlijke rekening is de pot. Wie privé iets betaalt dat
     # bij de pot hoort, krijgt dat van de pot terug (+). Wie privé iets ontvangt of laat betalen
     # dat van de pot is, is dat de pot schuldig (−). Inleg-afspraken tellen niet mee.
-    personen = sorted({x for l in lasten + polissen for x in (l["betaler"], l["hoort_bij"]) if x != "gezamenlijk"}
-                      | {i["hoort_bij"] for i in inkomsten if i["hoort_bij"] != "gezamenlijk"}
-                      | {i["ontvanger"] for i in inkomsten if i["ontvanger"] != "gezamenlijk"}
-                      | {s["hoort_bij"] for s in stromen if s["hoort_bij"] != "gezamenlijk"})
+    personen = sorted(({x for l in lasten + polissen for x in (l["betaler"], l["hoort_bij"])}
+                       | {i["hoort_bij"] for i in inkomsten} | {i["ontvanger"] for i in inkomsten}
+                       | {s["hoort_bij"] for s in stromen}) - {"gezamenlijk", ONBEKEND})
     saldo: dict[str, float] = {p: 0.0 for p in personen}  # + = pot is deze persoon geld schuldig
     regels = []
 
     def boek(wat, bedrag_pm, betaler, hoort_bij, soort="uitgave"):
-        if bedrag_pm <= 0 or betaler == hoort_bij:
+        if bedrag_pm <= 0 or betaler == hoort_bij or ONBEKEND in (betaler, hoort_bij):
             return
         if soort == "inkomst":
             if hoort_bij == "gezamenlijk" and betaler in saldo:      # privé ontvangen, is van de pot

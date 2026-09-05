@@ -1679,7 +1679,7 @@ function geldRij(x, soort, n){
   const sub = soort === 'inkomst' ? `${esc(x.komt_binnen_op)} · hoort bij ${esc(x.hoort_bij)}`
             : soort === 'hypotheek' ? `${esc(x.verstrekker || '')}${x.vorm ? ' · ' + esc(x.vorm) : ''}${x.rente_pct ? ' · ' + x.rente_pct + '%' : ''}`
             : `${esc(x.betaald_van)}${x.hoort_bij && x.hoort_bij !== x.betaald_van ? ' → ' + esc(x.hoort_bij) : ''}${soort === 'polis' && x.verzekeraar ? ' · ' + esc(x.verzekeraar) : ''}${x.frequentie && x.frequentie !== 'maand' ? ' · ' + euro2(x.bedrag) + ' per ' + esc(x.frequentie) : ''}`;
-  const badge = (x.dagen !== null && x.dagen !== undefined) ? `<small style="${x.dagen < 45 ? 'color:var(--amber)' : ''}">${x.dagen < 0 ? 'verlopen' : 'tot ' + esc(x.einddatum)}</small>` : '';
+  const badge = (x.controleren ? '<small class="due nu" style="margin-left:0">te controleren</small>' : '') + ((x.dagen !== null && x.dagen !== undefined) ? `<small style="${x.dagen < 45 ? 'color:var(--amber)' : ''}">${x.dagen < 0 ? 'verlopen' : 'tot ' + esc(x.einddatum)}</small>` : '');
   return `<div class="geld-rij klik" onclick="geldToggle('${id}')"><span>${esc(naam)} <small>▾ · ${sub}${soort === 'abo' && x.overstapdatum ? ' · overstap ' + esc(x.overstapdatum) : ''}</small></span>${badge}<b>${bedragTekst}</b></div>
     <div class="geld-detail" id="gd-${id}" hidden>${geldRijDetails(x, soort)}</div>`;
 }
@@ -1701,10 +1701,11 @@ function geldRijDetails(x, soort){
     rij('Opzegtermijn', esc(x.opzegtermijn)); rij('Startdatum', esc(x.startdatum)); rij('Einddatum', esc(x.einddatum));
     rij('Overstapmoment', x.overstapdatum ? esc(x.overstapdatum) + (x.overstap_dagen !== null && x.overstap_dagen !== undefined ? ` <small>(${x.overstap_dagen < 0 ? x.overstap_dagen * -1 + ' dagen geleden' : 'over ' + x.overstap_dagen + ' dagen'})</small>` : '') : '');
     rij('Verrekend via', x.verrekend_via ? esc(x.verrekend_via) + ' <small>(telt niet mee bij verrekenen)</small>' : '');
-    rij('Herkenning', x.herkenning ? `<code>${esc(x.herkenning)}</code>` : '');
+    rij('Herkenning (bankexport)', x.herkenning ? esc(x.herkenning) : '');
   }
   rij('Document', x.document ? (/^https?:/.test(x.document) ? `<a href="${esc(x.document)}" target="_blank" rel="noopener">📄 openen</a>` : esc(x.document)) : '');
   if (x.uitleg && soort === 'inkomst') det.push(`<div class="geld-uitleg">${esc(x.uitleg)}</div>`);
+  if (x.controleren) det.push('<p class="notitie" style="color:var(--amber)">⚠ Aanname of placeholder: nog controleren en in de Sheet aanpassen.</p>');
   if (x.notitie) det.push(`<p class="notitie">${esc(x.notitie)}</p>`);
   return det.join('');
 }
