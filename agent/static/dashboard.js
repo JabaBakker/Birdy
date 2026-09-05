@@ -1484,7 +1484,7 @@ async function renderGeld(){
   if (!GELD){ el.innerHTML = '<p class="leeg" style="margin:2rem">overzicht laden…</p>'; await geldLaad(); if (!GELD) return; }
   const g = GELD;
   const kop = `<div class="geld-kop"><h2>💶 Geld</h2>
-    <div class="fchips" style="margin:0"><button class="fchip${GELDSUB === 'overzicht' ? ' actief' : ''}" onclick="GELDSUB='overzicht';renderGeld()">Overzicht</button><button class="fchip${GELDSUB === 'verbeteren' ? ' actief' : ''}" onclick="GELDSUB='verbeteren';renderGeld()">Verbeteren & verrekenen</button></div>
+    <div class="fchips" style="margin:0">${[['overzicht', 'Overzicht'], ['onderliggend', 'Onderliggend'], ['verrekenen', 'Verrekenen & uitleg']].map(([k, l]) => `<button class="fchip${GELDSUB === k ? ' actief' : ''}" onclick="GELDSUB='${k}';renderGeld()">${l}</button>`).join('')}</div>
     <span class="notitie">stand ${esc(g.vandaag || '')} · per maand · tik op een post voor details</span>
     ${g.link ? `<a href="${esc(g.link)}" target="_blank" rel="noopener">📄 Sheet</a>` : ''}
     <button class="klein" onclick="geldPlus()">＋ toevoegen</button>
@@ -1494,7 +1494,7 @@ async function renderGeld(){
     el.innerHTML = kop + `<p class="leeg">Nog geen register. Vraag Birdy: “maak het financieel overzicht aan” (of draai <code>financien.py maak</code>).</p>` + geldWoordenlijst(g);
     return;
   }
-  el.innerHTML = kop + (GELDSUB === 'verbeteren' ? geldVerbeteren(g) : geldOverzicht(g));
+  el.innerHTML = kop + (GELDSUB === 'onderliggend' ? geldOnderliggend(g) : GELDSUB === 'verrekenen' ? geldVerrekenen(g) : geldOverzicht(g));
 }
 const KLEUREN_GELD = ['#7fbfa6', '#d9a44e', '#8ab4d8', '#b39ddb', '#e07a6a', '#f2a1c2', '#5b6570'];
 function kleurBlok(kleur){ return `<i class="init" style="background:${kleur};width:.7rem;height:.7rem;display:inline-block;border-radius:3px;margin-right:.4rem"></i>`; }
@@ -1574,7 +1574,12 @@ function geldOverzicht(g){
     <p class="notitie" style="margin-top:.6rem">Yvettes eigen rekening zit hier alleen in als haar bijdrage aan de pot.</p>
     ${geldUitlegKnop(g, 'overzicht', 'Leg in gewone taal uit wat er van ons inkomen overblijft na vaste lasten, budgetten en de jaarlijkse pieken, en waar we op kunnen sturen.')}
   </div>`;
-  html += '</div><div class="geld-grid" style="margin-top:.9rem">';
+  html += '</div>';
+  return html;
+}
+function geldOnderliggend(g){
+  const h = g.hypotheek, pol = g.polissen || [], lastenAlle = g.vaste_lasten || [];
+  let html = '<div class="geld-grid" style="grid-template-columns:repeat(auto-fit, minmax(340px, 1fr))">';
   // ── rij 2, kaart 1: hypotheek ──
   const rentePct = h.maandlast ? Math.round(h.rente / h.maandlast * 100) : 0;
   html += `<div class="panel"><div class="kaartkop"><span class="ico">🏠</span><h2>Hypotheek</h2></div>
@@ -1601,6 +1606,11 @@ function geldOverzicht(g){
     ${abo.map((l, n) => geldRij(l, 'abo', n)).join('') || '<p class="leeg">geen abonnementen met datums; vul Startdatum/Einddatum/Overstapdatum in de Sheet in</p>'}
     ${geldUitlegKnop(g, 'abonnementen', 'Kijk naar onze abonnementen en contracten: welke lopen af, waar zit een opzegtermijn of overstapmoment, en wat kunnen we opzeggen of versimpelen?')}
   </div>`;
+  return html + '</div>';
+}
+function geldVerrekenen(g){
+  const v = g.verrekening;
+  let html = '<div class="geld-grid" style="grid-template-columns:repeat(auto-fit, minmax(340px, 1fr))">';
   // ── kaart 4: constructies & verrekeningen (structureel) ──
   const regelingen = (g.inkomsten || []).filter(i => i.regeling);
   html += `<div class="panel"><div class="kaartkop"><span class="ico">🔁</span><h2>Constructies & verrekeningen</h2></div>
@@ -1615,7 +1625,7 @@ function geldOverzicht(g){
     ${(v.regels || []).slice(0, 8).map(r => `<div class="geld-rij"><span>${esc(r.wat)} <small>· ${esc(r.tekst)}</small></span><b>${r.richting === 'van_pot' ? '+' : '−'} ${euro2(r.bedrag)}</b></div>`).join('')}
     ${geldUitlegKnop(g, 'verrekenen', 'Leg in gewone taal uit hoe onze geldstromen, toeslagen en constructies werken, wat de inleg-afspraak inhoudt en wat er nog te verrekenen valt.')}
   </div>`;
-  html += '</div>' + geldWoordenlijst(g);
+  html += '</div>' + geldVerbeteren(g) + geldWoordenlijst(g);
   return html;
 }
 function geldVerbeteren(g){
