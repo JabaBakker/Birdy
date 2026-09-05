@@ -93,6 +93,9 @@ def parse_abn_pdf(data: bytes, rekening_naam: str = "ABN") -> list[dict]:
         o = re.sub(r"\s+", " ", h["oms"]).strip()
         naam, tegen, soort = "", "", "overig"
         if "/TRTP/" in o:
+            # door regelafbreking staan veldnamen soms gebroken in de tekst ("/N AME/", "/RE MI/", "/B IC/")
+            for tag in ("TRTP", "CSID", "NAME", "MARF", "REMI", "IBAN", "BIC", "EREF", "ORDP", "ID"):
+                o = re.sub("/" + r"\s?".join(tag) + "/", "/" + tag + "/", o)
             m = re.search(r"/NAME/(.+?)/", o); naam = m.group(1).strip() if m else ""
             m = re.search(r"/IBAN/([A-Z]{2}\d{2}[A-Z0-9]{4}\d{10})", o); tegen = m.group(1) if m else ""
             ms = re.search(r"/TRTP/(.+?)/", o); s = ms.group(1).lower() if ms else ""
@@ -112,6 +115,8 @@ def parse_abn_pdf(data: bytes, rekening_naam: str = "ABN") -> list[dict]:
         elif o.startswith("eCom,"):
             soort = "pin"; naam = re.sub(r"^eCom, (Apple Pay )?", "", o).split(",PAS")[0][:40].strip()
         else:
+            naam = o[:40]
+        if not naam.strip():
             naam = o[:40]
         res.append(_tx(h["datum"], rekening_naam, naam, tegen, soort, h["bedrag"], o))
     return res
