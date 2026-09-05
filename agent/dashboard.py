@@ -23,7 +23,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import agenda, bronnen, financien, signalen, todoist
+from . import agenda, bank, bronnen, financien, signalen, todoist
 from .brain import Brain
 from .config import Config
 
@@ -87,6 +87,8 @@ class Dashboard:
         app.router.add_get("/api/besparingen", self.besparingen_get)
         app.router.add_post("/api/besparingen", self.besparingen_post)
         app.router.add_post("/api/upload", self.upload)
+        app.router.add_post("/api/bankexport", self.bankexport)
+        app.router.add_get("/api/transacties", self.transacties)
         app.router.add_get("/api/plan", self.plan_get)
         app.router.add_post("/api/plan", self.plan_post)
         app.router.add_get("/api/overview", self.overview)
@@ -365,6 +367,82 @@ class Dashboard:
                     log.exception("echo van upload mislukt")
         self._invalidate()
         return web.json_response({"ok": True, "reply": reply, "pad": rel})
+
+    # -- bankexports (3.1): csv/pdf → transacties.json, pop-out per categorie ------------
+
+    async def bankexport(self, request: web.Request) -> web.Response:
+        """multipart: één of meer velden 'bestand' (ING-csv, ABN-pdf, ICS-pdf), optioneel 'rekening'."""
+        fout = self._geld_ok(request)
+        if fout:
+            return fout
+        reader = await request.multipart()
+        bestanden, rekening = [], ""
+        while True:
+            deel = await reader.next()
+            if deel is None:
+                break
+            if deel.name == "rekening":
+                rekening = (await deel.text()).strip()[:40]
+            elif deel.name == "bestand":
+                naam = Path(deel.filename or "export").name[:120]
+                data = bytearray()
+                while True:
+                    chunk = await deel.read_chunk(65536)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if len(data) > 25 * 1024 * 1024:
+                        return web.json_response({"error": f"{naam}: groter dan 25 MB"}, status=413)
+                bestanden.append((naam, bytes(data)))
+        if not bestanden:
+            return web.json_response({"error": "geen bestand"}, status=400)
+        register = await self._geld_lees()
+        resultaten, alle = [], []
+        for naam, data in bestanden:
+            try:
+                rek, tx = await asyncio.to_thread(bank.parse_bestand, naam, data, rekening)
+                alle.extend(tx)
+                resultaten.append({"bestand": naam, "rekening": rek, "transacties": len(tx)})
+            except Exception as e:  # noqa: BLE001
+                resultaten.append({"bestand": naam, "fout": str(e)[:200]})
+        stand = await asyncio.to_thread(bank.voeg_toe, self.cfg.workspace, alle, register) if alle else None
+        # exports ook in Drive bewaren (30 Financiën/Bankexports), stil; mislukken mag
+        try:
+            from googleapiclient.http import MediaIoBaseUpload
+            from . import gdrive
+            import io as _io
+
+            def bewaar():
+                svc = gdrive._service()
+                map_ = gdrive._ensure_folder(svc, "30 Financiën/Bankexports")
+                for naam, data in bestanden:
+                    if not gdrive._children(svc, map_, name=naam):
+                        svc.files().create(body={"name": naam, "parents": [map_]},
+                                           media_body=MediaIoBaseUpload(_io.BytesIO(data), mimetype="application/octet-stream"),
+                                           fields="id").execute()
+            await asyncio.to_thread(bewaar)
+        except BaseException:
+            log.warning("bankexport in Drive bewaren mislukt", exc_info=True)
+        return web.json_response({"ok": bool(alle), "bestanden": resultaten, "stand": stand})
+
+    async def transacties(self, request: web.Request) -> web.Response:
+        """?categorie=… | ?post=… | ?rekening=… | &maanden=6 → samenvatting; zonder filter → categorieën."""
+        fout = self._geld_ok(request)
+        if fout:
+            return fout
+        tx = await asyncio.to_thread(bank.laad, self.cfg.workspace)
+        q = request.query
+        try:
+            maanden = max(1, min(36, int(q.get("maanden", "6"))))
+        except ValueError:
+            maanden = 6
+        if q.get("categorie") or q.get("post") or q.get("rekening"):
+            data = bank.samenvatting(tx, maanden, q.get("categorie") or None, q.get("post") or None, q.get("rekening") or None)
+        else:
+            data = {"categorieen": bank.categorieen(tx, maanden), "aantal": len(tx),
+                    "van": tx[0]["datum"] if tx else "", "tot": tx[-1]["datum"] if tx else "",
+                    "rekeningen": sorted({t["rekening"] for t in tx})}
+        return web.json_response(data, headers={"Cache-Control": "no-store"})
 
     # -- gedeelde kinderplanning (zelfde timer op tablet én telefoon) -------
 

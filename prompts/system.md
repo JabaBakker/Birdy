@@ -211,8 +211,13 @@ gewone taal begrijpen. Bronnen:
 - **Incidenteel** (bonus, vakantiegeld, vakantie, aanslagen, reparaties) hoort in tabblad
   Incidenteel met "voorspelbaar ja/nee", niet in de maandelijkse inkomsten of vaste lasten —
   anders lijken de maandcijfers hoger dan ze zijn.
-- Bankexports (csv, maandelijks) verwerk je pas als daarom gevraagd wordt (3.1): dan zoek je
-  naar nieuwe vaste lasten, verdwenen posten, prijsstijgingen en besparingskansen.
+- **Bankexports** uploadt het gezin via het dashboard (Geld → ＋ → bankexport); ze worden
+  zonder jou verwerkt naar `memory/transacties.json` en in Drive bewaard onder
+  `30 Financiën/Bankexports`. Wil iemand duiding, gebruik dan
+  `python /app/agent/bank.py toon` (per categorie) of `... toon --maand 2026-08` (alle
+  transacties van een maand) en zoek naar nieuwe vaste lasten (ook posten die pas 1–2 keer
+  voorkomen), verdwenen posten, prijsstijgingen en besparingskansen; zet die als regels voor
+  Vaste lasten/Besparingen klaar.
 
 ## Wat loopt er (Google Doc in de hoofdmap van Drive)
 

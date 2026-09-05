@@ -503,3 +503,20 @@
 .geld-detail .geld-rij { font-size:.86rem; padding:.18rem 0; }
 .geld-detail .geld-rij:first-of-type { border-top:none; }
 .geld-detail code { font-size:.8rem; color:var(--dim); }
+
+/* geld: lay-outfixes — naam mag wrappen, label/bedrag krimpen niet, detailwaarden mogen wrappen */
+.geld-rij > span { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+.geld-rij > b, .geld-rij > small { flex:0 0 auto; }
+.geld-rij .due { display:inline-block; vertical-align:baseline; margin:0 .3rem 0 0; }
+.geld-detail .geld-rij b { white-space:normal; text-align:right; overflow-wrap:anywhere; max-width:62%; }
+.geld-detail .geld-rij span { flex:1 1 38%; }
+/* pop-out: dieper de cijfers in */
+.gp-kop { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; margin-bottom:.4rem; }
+.gp-kop .geld-groot { font-size:1.5rem; }
+.gp-maanden { display:flex; gap:.35rem; align-items:flex-end; height:110px; margin:.6rem 0 .3rem; }
+.gp-maanden div { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; font-size:.7rem; color:var(--dim); }
+.gp-maanden i { display:block; width:100%; background:var(--accent); border-radius:5px 5px 0 0; min-height:2px; }
+.gp-maanden b { font-size:.72rem; color:var(--ink); margin-bottom:.15rem; }
+.gp-partij { cursor:pointer; }
+.gp-tx { font-size:.85rem; color:var(--dim); display:grid; grid-template-columns:5.2rem 1fr auto; gap:.4rem; padding:.15rem 0 .15rem .5rem; border-left:2px solid var(--lijn); }
+.gp-tx b { color:var(--ink); font-weight:500; white-space:nowrap; }

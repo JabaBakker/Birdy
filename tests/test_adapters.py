@@ -231,6 +231,8 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(r.status, 403)  # geen pincode ingesteld in de test
                 async with s.get("http://127.0.0.1:18811/api/verreken", headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 403)  # zonder pincode
+                async with s.get("http://127.0.0.1:18811/api/transacties", headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual(r.status, 403)  # zonder pincode
                 async with s.get("http://127.0.0.1:18811/manifest.webmanifest") as r:
                     self.assertEqual(r.status, 200)
                 async with s.get("http://127.0.0.1:18811/sw.js") as r:
@@ -465,6 +467,31 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             await d.stop()
             (cfg.workspace / "memory" / "verrekenen.json").unlink(missing_ok=True)
             (cfg.workspace / "memory" / "besparingen.json").unlink(missing_ok=True)
+
+    def test_bank_parsers_en_categorien(self):
+        from pathlib import Path
+        from agent import bank
+        csv_data = ('"Date","Name / Description","Account","Counterparty","Code","Debit/credit","Amount (EUR)","Transaction type","Notifications"\n'
+                    '"20260901","Albert Heijn 1219","NL20INGB0688967574","","BA","Debit","3,57","Payment terminal","Card no: x"\n'
+                    '"20260826","J BAKKER","NL20INGB0688967574","NL52ABNA0541363123","OV","Credit","4300,00","Transfer","Name: J BAKKER Description: Maandelijkse inleg Jaap"\n'
+                    '"20260826","Smallsteps B.V.","NL20INGB0688967574","NL51RABO0307495248","IC","Debit","2651,70","SEPA direct debit","Smallsteps 09-2026"\n').encode()
+        rek, tx = bank.parse_bestand("export.csv", csv_data, "ING gezamenlijk")
+        self.assertEqual(rek, "ING gezamenlijk"); self.assertEqual(len(tx), 3)
+        self.assertEqual([t["bedrag"] for t in tx], [-3.57, 4300.0, -2651.7])
+        register = {"beschikbaar": True, "rekeningen": [{"iban": "NL52ABNA0541363123"}],
+                    "vaste_lasten": [{"naam": "Kinderopvang Smallsteps", "categorie": "Kinderen", "herkenning": "NL51RABO0307495248"}],
+                    "polissen": [], "variabel": [{"naam": "Boodschappen (Picnic, AH, Jumbo)", "herkenning": "Picnic|Albert Heijn"}], "inkomsten": []}
+        bank.categoriseer(tx, register)
+        self.assertEqual([t["categorie"] for t in tx], ["Boodschappen (Picnic, AH, Jumbo)", "Overboeking eigen rekeningen", "Kinderen"])
+        self.assertEqual(tx[2]["post"], "Kinderopvang Smallsteps")
+        ws = Path(os.environ["AGENT_WORKSPACE"]); (ws / "memory" / "transacties.json").unlink(missing_ok=True)
+        stand = bank.voeg_toe(ws, tx, register); self.assertEqual((stand["toegevoegd"], stand["totaal"]), (3, 3))
+        stand = bank.voeg_toe(ws, tx, register); self.assertEqual((stand["toegevoegd"], stand["dubbel"]), (0, 3))
+        sam = bank.samenvatting(bank.laad(ws), 6, categorie="Kinderen")
+        self.assertEqual(sam["aantal"], 1); self.assertEqual(sam["partijen"][0]["naam"], "Smallsteps B.V.")
+        cats = bank.categorieen(bank.laad(ws), 6)
+        self.assertTrue(any(c["categorie"] == "Kinderen" for c in cats)); self.assertFalse(any("Overboeking" in c["categorie"] for c in cats))
+        (ws / "memory" / "transacties.json").unlink(missing_ok=True)
 
     def test_dubbelingen(self):
         from agent.signalen import dubbelingen
