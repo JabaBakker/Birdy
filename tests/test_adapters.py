@@ -213,6 +213,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                 async with s.post("http://127.0.0.1:18811/api/event", json={"actie": "verwijder"},
                                   headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 400)  # verwijderen zonder id
+                (cfg.workspace / "memory" / "planning.json").unlink(missing_ok=True)  # schone lei, ook na een eerdere run
                 async with s.get("http://127.0.0.1:18811/api/plan", headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 200)
                     self.assertEqual((await r.json())["bijgewerkt"], 0)  # nog niets gedeeld
