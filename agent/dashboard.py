@@ -8,7 +8,8 @@ Aan/uit via DASHBOARD_TOKEN in .env: leeg = dashboard uit.
 - GET  /api/overview    → agenda, aandacht (regels +
                           Birdy's briefingpunten uit AANDACHT.md), lijstjes, verjaardagen,
                           regelzaken, thuis (JSON, cache 2 min)
-- POST /api/message     → {"text": ...} → zelfde brein als de chat; antwoord terug + echo in Slack
+- POST /api/message     → {"text": ..., "van"?: "Jaap", "wacht"?: false} → zelfde brein als de chat;
+                          antwoord terug + echo in Slack (wacht=false: meteen terug, antwoord alleen in Slack)
 - GET/POST /api/plan    → gedeelde kinderplanning (workspace/memory/planning.json), zodat de
                           timer op tablet én telefoon dezelfde is
 """
@@ -71,6 +72,7 @@ class Dashboard:
         self._geld: dict | None = None  # financieel register (Sheet), eigen cache van 5 min
         self._geld_ts = 0.0
         self._runner: web.AppRunner | None = None
+        self._achtergrond: set[asyncio.Task] = set()  # berichten die op de achtergrond lopen
         self._picnic: dict | None = None  # Picnic-mandje, eigen cache van 1 min
         self._picnic_ts = 0.0
 
@@ -973,19 +975,32 @@ class Dashboard:
         text = str(body.get("text", "")).strip()[:1000]
         if not text:
             return web.json_response({"error": "leeg bericht"}, status=400)
+        # optioneel: wie het zegt (iPhone-Opdracht "Birdy": {"van": "Jaap"}) — alleen letters
+        van = "".join(c for c in str(body.get("van", "")) if c.isalpha() or c in " -")[:30].strip()
+        sender = f"{van} (via de telefoon)" if van else "het dashboard (muurtablet)"
+        kop = f"🎤 {van}" if van else "🎤 Dashboard"
 
-        async with self.work_lock:
-            reply = await self.brain.run(
-                "process_message.md", "dashboard-bericht",
-                sender="het dashboard (muurtablet)", text=text, photo="(geen bijlage)",
-            )
-        reply = reply or "Hm, daar ging iets mis — probeer het nog eens?"
-        self._invalidate(ook_traag=True)  # het brein kan ook agenda/documenten hebben aangepast
-        self._picnic = None  # … en het Picnic-mandje
-        for adapter in self.adapters:
-            if adapter is not self:
-                try:
-                    await adapter.broadcast(f"🎤 Dashboard: “{text}”\n{reply}", kind="chat")
-                except Exception:
-                    pass
-        return web.json_response({"reply": reply})
+        async def verwerk() -> str:
+            async with self.work_lock:
+                reply = await self.brain.run(
+                    "process_message.md", "dashboard-bericht",
+                    sender=sender, text=text, photo="(geen bijlage)",
+                )
+            reply = reply or "Hm, daar ging iets mis — probeer het nog eens?"
+            self._invalidate(ook_traag=True)  # het brein kan ook agenda/documenten hebben aangepast
+            self._picnic = None  # … en het Picnic-mandje
+            for adapter in self.adapters:
+                if adapter is not self:
+                    try:
+                        await adapter.broadcast(f"{kop}: “{text}”\n{reply}", kind="chat")
+                    except Exception:
+                        pass
+            return reply
+
+        if body.get("wacht") is False:
+            # niet wachten (iPhone-Opdracht): meteen bevestigen, het antwoord komt in Slack
+            taak = asyncio.create_task(verwerk())
+            self._achtergrond.add(taak)
+            taak.add_done_callback(self._achtergrond.discard)
+            return web.json_response({"reply": "👍 Doorgegeven aan Birdy — het antwoord komt in Slack."})
+        return web.json_response({"reply": await verwerk()})

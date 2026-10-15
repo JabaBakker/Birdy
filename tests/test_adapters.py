@@ -642,6 +642,28 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             await d.stop()
             picnic._keuzes_pad().unlink(missing_ok=True)
 
+    async def test_dashboard_bericht_telefoon(self):
+        from agent.dashboard import Dashboard
+        brain = FakeBrain()
+        echo = MagicMock(); echo.broadcast = AsyncMock()
+        d = Dashboard(Config(dashboard_token="geheim", dashboard_port=18815), brain, asyncio.Lock(), [echo])
+        await d.start()
+        url, h = "http://127.0.0.1:18815/api/message", {"X-Dashboard-Key": "geheim"}
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as s:
+                async with s.post(url, json={"text": "band plakken", "van": "Jaap<script>"}, headers=h) as r:
+                    self.assertEqual((await r.json())["reply"], "OK-ANTWOORD")
+                self.assertEqual(brain.calls[-1][2]["sender"], "Jaapscript (via de telefoon)")
+                async with s.post(url, json={"text": "melk op de lijst", "wacht": False}, headers=h) as r:
+                    self.assertIn("Doorgegeven", (await r.json())["reply"])
+                await asyncio.sleep(0.1)  # achtergrondtaak afronden
+                self.assertEqual(brain.calls[-1][2]["text"], "melk op de lijst")
+                self.assertEqual(brain.calls[-1][2]["sender"], "het dashboard (muurtablet)")
+                self.assertTrue(any("melk op de lijst" in c.args[0] for c in echo.broadcast.call_args_list))
+        finally:
+            await d.stop()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
