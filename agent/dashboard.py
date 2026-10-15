@@ -17,13 +17,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from aiohttp import web
 
-from . import agenda, bank, bronnen, financien, signalen, todoist
+from . import agenda, bank, bronnen, financien, geheugen, signalen, todoist
 from .brain import Brain
 from .config import Config
 
@@ -31,6 +32,9 @@ STATIC_DIR = Path(__file__).parent / "static"  # dashboard.html/.css/.js + logo'
 STATIC_BESTANDEN = ("dashboard.css", "dashboard.js", "manifest.webmanifest", "sw.js",
                     "icon-192.png", "icon-512.png")
 PLAN_MAX_BYTES = 60_000  # gedeelde kinderplanning (planning.json) blijft klein
+# werkbestanden die Birdy zelf bijhoudt; de Geheugen-tab toont ze (alleen-lezen)
+WERKBESTANDEN = ("GEZIN.md", "VOORKEUREN.md", "INTENTIES.md", "HERHALEND.md", "TAKEN.md", "AANDACHT.md")
+BESTAND_MAX = 40_000  # tekens per getoond bestand
 
 
 def _static_versie() -> str:
@@ -92,6 +96,8 @@ class Dashboard:
         app.router.add_get("/api/plan", self.plan_get)
         app.router.add_post("/api/plan", self.plan_post)
         app.router.add_get("/api/overview", self.overview)
+        app.router.add_get("/api/geheugen", self.geheugen_get)
+        app.router.add_post("/api/geheugen", self.geheugen_post)
         app.router.add_get("/api/agenda", self.agenda)
         app.router.add_post("/api/message", self.message)
         app.router.add_post("/api/done", self.done)
@@ -500,6 +506,95 @@ class Dashboard:
             log.warning("planning opslaan mislukt", exc_info=True)
             return web.json_response({"error": "opslaan mislukt"}, status=500)
         return web.json_response({"ok": True, "bijgewerkt": huidig["bijgewerkt"]})
+
+    # -- geheugen (tab Geheugen) ---------------------------------------------
+
+    @staticmethod
+    def _claude_geheugen_dirs() -> list[Path]:
+        """Mappen waar de Claude-software zelf notities bewaarde (auto memory, nu uitgezet)."""
+        basis = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+        return sorted(p for p in (basis / "projects").glob("*/memory") if p.is_dir())
+
+    def _geheugen_overzicht(self) -> dict:
+        punten = geheugen.alle()
+        bestanden = []
+        for naam in WERKBESTANDEN:
+            pad = self.cfg.workspace / naam
+            try:
+                tekst = pad.read_text()
+            except OSError:
+                continue
+            bestanden.append({"naam": naam, "tekst": tekst[:BESTAND_MAX],
+                              "gewijzigd": datetime.fromtimestamp(pad.stat().st_mtime).strftime("%Y-%m-%d %H:%M")})
+        claude = []
+        for map_ in self._claude_geheugen_dirs():
+            for pad in sorted(map_.rglob("*.md")):
+                try:
+                    claude.append({"naam": f"{map_.parent.name}/{pad.relative_to(map_)}",
+                                   "tekst": pad.read_text()[:BESTAND_MAX]})
+                except OSError:
+                    continue
+        return {
+            "actief": [p for p in punten if p["status"] == "actief"],
+            "verlopen": [p for p in punten if p["status"] == "verlopen"],
+            "vergeten": [p for p in punten if p["status"] == "vergeten"],
+            "bewaar_dagen": geheugen.BEWAAR_DAGEN,
+            "bestanden": bestanden,
+            "claude": claude,
+        }
+
+    async def geheugen_get(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        data = await asyncio.to_thread(self._geheugen_overzicht)
+        return web.json_response(data, headers={"Cache-Control": "no-store"})
+
+    def _claude_bestand_weg(self, naam: str) -> bool:
+        """Eén oud auto-memory-bestand verwijderen; alleen binnen de memory-mappen."""
+        for map_ in self._claude_geheugen_dirs():
+            prefix = map_.parent.name + "/"
+            if not naam.startswith(prefix):
+                continue
+            pad = (map_ / naam[len(prefix):]).resolve()
+            if pad.suffix == ".md" and pad.is_file() and map_.resolve() in pad.parents:
+                pad.unlink()
+                return True
+        return False
+
+    async def geheugen_post(self, request: web.Request) -> web.Response:
+        """{actie: nieuw|vergeet|herstel|wijzig|claude-weg, id?, tekst?, over?, soort?, tot?, naam?}"""
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            assert isinstance(body, dict)
+        except Exception:
+            return web.json_response({"error": "geen geldige json"}, status=400)
+        actie = body.get("actie")
+        pid = str(body.get("id", ""))
+        tekstveld = lambda k: body[k] if isinstance(body.get(k), str) else None  # noqa: E731
+        try:
+            if actie == "nieuw":
+                p = await asyncio.to_thread(geheugen.voeg_toe, tekstveld("tekst") or "", tekstveld("over") or "",
+                                            tekstveld("soort") or "info", tekstveld("tot") or "", "dashboard")
+            elif actie == "vergeet":
+                p = await asyncio.to_thread(geheugen.vergeet, pid)
+            elif actie == "herstel":
+                p = await asyncio.to_thread(geheugen.wijzig, pid, vergeten=False)
+            elif actie == "wijzig":
+                p = await asyncio.to_thread(geheugen.wijzig, pid, tekst=tekstveld("tekst"), over=tekstveld("over"),
+                                            soort=tekstveld("soort"), tot=tekstveld("tot"))
+            elif actie == "claude-weg":
+                if not await asyncio.to_thread(self._claude_bestand_weg, str(body.get("naam", ""))):
+                    return web.json_response({"error": "bestand niet gevonden"}, status=404)
+                return web.json_response({"ok": True})
+            else:
+                return web.json_response({"error": "onbekende actie"}, status=400)
+        except KeyError:
+            return web.json_response({"error": "punt niet gevonden"}, status=404)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response({"ok": True, "punt": p})
 
     async def overview(self, request: web.Request) -> web.Response:
         if not self._authorized(request):

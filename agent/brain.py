@@ -2,16 +2,23 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
+from . import geheugen
 from .config import Config
 from .ledger import Ledger
 
 log = logging.getLogger("fien")
+
+# Geen verborgen geheugen: de Claude-software zou anders zelf notities bewaren in
+# /root/.claude/projects/*/memory/ (onzichtbaar, zonder vervaldatum). Alles wat Birdy
+# onthoudt hoort in memory/geheugen.json, zichtbaar op het dashboard (tab Geheugen).
+os.environ["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
 
 ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "WebSearch", "WebFetch"]
 
@@ -56,6 +63,15 @@ class Brain:
         system_prompt = (self.cfg.prompts_dir / "system.md").read_text().replace(
             "{ouders}", self.cfg.ouders).replace("{vangnet}", self.cfg.vangnet).replace(
             "{agent_name}", self.cfg.agent_name
+        )
+        try:
+            onthouden = geheugen.als_prompt()
+        except Exception:  # noqa: BLE001 - een kapot geheugenbestand mag een cyclus niet stoppen
+            log.exception("geheugen lezen mislukt")
+            onthouden = "(geheugen tijdelijk niet leesbaar)"
+        system_prompt += (
+            "\n\n## Wat je nu onthoudt (memory/geheugen.json, alleen actieve punten)\n\n"
+            + onthouden + "\n"
         )
 
         options = ClaudeAgentOptions(

@@ -7,6 +7,8 @@
 • "Dit komt elke ~6 weken terug" → terugkerende taak; ik hou bij wanneer het
   voor het laatst gedaan is en meld me als het weer tijd is
 • "Voortaan graag zo…" → ik onthoud het als blijvende voorkeur
+• "Onthoud dat…" / "vergeet…" → in mijn geheugenlijst, meestal met een einddatum;
+  alles wat ik onthoud staat op het dashboard onder Geheugen
 • "Wanneer is…?" → ik kijk in de gezinsagenda (Google Calendar), en echte
   afspraken zet ik er ook in
 

@@ -17,13 +17,16 @@ function kiesTab(t){
   document.getElementById('paneelWeek').style.display = t === 'week' ? 'block' : 'none';
   document.getElementById('paneelPlan').style.display = t === 'plan' ? 'block' : 'none';
   document.getElementById('paneelGeld').style.display = t === 'geld' ? 'block' : 'none';
+  document.getElementById('paneelGeheugen').style.display = t === 'geheugen' ? 'block' : 'none';
   document.getElementById('tabVandaag').classList.toggle('actief', t === 'vandaag');
   document.getElementById('tabWeek').classList.toggle('actief', t === 'week');
   document.getElementById('tabPlan').classList.toggle('actief', t === 'plan');
   document.getElementById('tabGeld').classList.toggle('actief', t === 'geld');
+  document.getElementById('tabGeheugen').classList.toggle('actief', t === 'geheugen');
   try { localStorage.setItem('birdy-tab', t === 'geld' ? 'vandaag' : t); } catch(e){}  // geld nooit als starttab
   if (t === 'plan') renderPlan();
   if (t === 'geld') renderGeld();
+  if (t === 'geheugen') renderGeheugen();
 }
 
 function vul(id, items, maak){ const el = document.getElementById(id);
@@ -1870,4 +1873,110 @@ async function geldPopLaad(){
       <div class="geld-detail" id="gd-gp-${i}" hidden>${d.transacties.filter(t => t.sleutel === p.sleutel).map(t => `<div class="gp-tx"><span>${esc(t.datum.slice(2))}</span><span>${esc(t.omschrijving.slice(0, 90))}<br><small>${esc(t.rekening)} · ${esc(t.categorie)}</small></span><b style="${t.bedrag > 0 ? 'color:var(--accent)' : ''}">${euro2(t.bedrag)}</b></div>`).join('')}</div>`).join('');
     el.innerHTML = html;
   } catch(e){ el.innerHTML = `<p class="leeg">Cijfers laden lukte niet: ${esc(e.message)}</p>`; }
+}
+
+// ── geheugen: alles wat Birdy onthoudt, zichtbaar en op te schonen ─────────
+// (var i.p.v. let: kiesTab('geheugen') kan bij het laden al lopen vóór deze regels)
+var GEHEUGEN = null;
+async function geheugenLaad(){
+  try {
+    const r = await fetch('/api/geheugen', { headers:{ 'X-Dashboard-Key': KEY } });
+    if (r.status === 401) { toonSleutel(); return; }
+    GEHEUGEN = await r.json();
+  } catch(e){ GEHEUGEN = { fout: true }; }
+}
+function gDatum(iso){ if (!iso) return ''; const [j, m, d] = iso.split('-'); return `${+d}-${+m}-${j}`; }
+function gPunt(p){
+  const pil = !p.tot ? '<span class="gpil blijvend">blijvend</span>'
+    : `<span class="gpil${p.status === 'verlopen' ? ' oud' : ''}">${p.status === 'verlopen' ? 'verlopen' : 'tot'} ${gDatum(p.tot)}</span>`;
+  const id = jsAttr(p.id);
+  const knoppen = p.status === 'vergeten'
+    ? `<button class="klein" onclick="gActie('herstel', ${id})">Terughalen</button>`
+    : `<button class="klein" title="einddatum kiezen" onclick="gTot(${id})">${p.status === 'verlopen' ? 'Verleng' : '📅'}</button>` +
+      `<button class="klein" onclick="gActie('vergeet', ${id})">Vergeet</button>`;
+  return `<li class="gpunt ${p.status}"><div><span>${esc(p.tekst)}</span>` +
+    `<small>${esc(p.soort || 'info')} · sinds ${gDatum(p.sinds)}${p.bron ? ' · ' + esc(p.bron) : ''}` +
+    `${p.status === 'vergeten' ? ' · vergeten op ' + gDatum(p.vergeten) : ''}</small></div>` +
+    `<div class="gknoppen">${p.status === 'vergeten' ? '' : pil}${knoppen}</div></li>`;
+}
+function gGroepen(punten){
+  const g = {};
+  punten.forEach(p => { const k = p.over || 'Algemeen'; (g[k] = g[k] || []).push(p); });
+  return Object.keys(g)
+    .sort((a, b) => a === 'Algemeen' ? 1 : b === 'Algemeen' ? -1 : a.localeCompare(b, 'nl'))
+    .map(k => `<div class="panel gkaart"><div class="kaartkop"><h3>${esc(k)}</h3><b>${g[k].length}</b></div>` +
+      `<ul>${g[k].map(gPunt).join('')}</ul></div>`).join('');
+}
+async function renderGeheugen(){
+  const el = document.getElementById('paneelGeheugen');
+  if (!GEHEUGEN) el.innerHTML = '<p class="leeg" style="margin:2rem">geheugen laden…</p>';
+  await geheugenLaad();
+  const g = GEHEUGEN;
+  if (!g) return;
+  if (g.fout) { el.innerHTML = '<p class="leeg" style="margin:2rem">Het geheugen is even niet bereikbaar.</p>'; return; }
+  const kop = `<div class="geheugen-kop"><h2>🧠 Wat Birdy onthoudt</h2>
+    <span class="notitie">${g.actief.length} actief · verlopen punten gebruikt Birdy niet meer en verdwijnen na ${g.bewaar_dagen} dagen</span>
+    <button class="klein" onclick="renderGeheugen()" title="vernieuwen">↻</button></div>`;
+  const nieuw = `<div class="panel gnieuw">
+    <input id="gTekst" placeholder="Laat Birdy iets onthouden…" enterkeyhint="done" onkeydown="if(event.key==='Enter')gNieuw()">
+    <input id="gOver" placeholder="over wie/wat (bijv. Chloe)">
+    <label class="notitie">geldig tot <input id="gTot" type="date"></label>
+    <button class="klein" onclick="gNieuw()">Onthoud</button></div>`;
+  const claude = g.claude.length ? `<div class="panel gwaarschuwing">
+    <p>⚠ <b>Oud verborgen geheugen gevonden.</b> De Claude-software bewaarde hier zelf notities, zonder einddatum.
+    Birdy gebruikt dit niet meer. Laat Birdy het overzetten naar de lijst hieronder, of verwijder het per bestand.</p>
+    <p style="margin:.5rem 0"><button class="klein" onclick="gOverzetten()">Laat Birdy overzetten</button></p>
+    ${g.claude.map(b => `<details class="gsectie"><summary>${esc(b.naam)}</summary><pre>${esc(b.tekst)}</pre>
+      <button class="klein" onclick="gClaudeWeg(${jsAttr(b.naam)})">Verwijder dit bestand</button></details>`).join('')}</div>` : '';
+  const lijst = g.actief.length ? `<div class="ggrid">${gGroepen(g.actief)}</div>`
+    : '<p class="leeg" style="margin:1rem 0">Birdy onthoudt nog niets in deze lijst.</p>';
+  const sectie = (titel, punten) => punten.length
+    ? `<details class="gsectie"><summary>${titel} (${punten.length})</summary><div class="panel gkaart"><ul>${punten.map(gPunt).join('')}</ul></div></details>` : '';
+  const bestanden = g.bestanden.length ? `<details class="gsectie"><summary>📄 Werkbestanden van Birdy (${g.bestanden.length}) — alleen-lezen</summary>
+    ${g.bestanden.map(b => `<details class="gsectie"><summary>${esc(b.naam)} · gewijzigd ${esc(b.gewijzigd)}</summary><pre>${esc(b.tekst)}</pre></details>`).join('')}</details>` : '';
+  el.innerHTML = kop + nieuw + claude + lijst +
+    sectie('⏳ Verlopen — Birdy gebruikt deze niet meer', g.verlopen) +
+    sectie('🗑 Vergeten — nog terug te halen', g.vergeten) + bestanden;
+}
+async function gPost(body){
+  try {
+    const r = await fetch('/api/geheugen', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'mislukt');
+    return d;
+  } catch(e){ toon('⚠ ' + (e.message || 'mislukt')); return null; }
+}
+async function gActie(actie, id){
+  const d = await gPost({ actie, id });
+  if (!d) return;
+  if (actie === 'vergeet') toonMetKnop(`Vergeten: ${d.punt.tekst}`, 'Ongedaan maken', () => gActie('herstel', id));
+  renderGeheugen();
+}
+function gTot(id){
+  const inp = document.createElement('input');
+  inp.type = 'date';
+  inp.style.cssText = 'position:fixed;bottom:0;left:0;opacity:0;pointer-events:none';
+  document.body.appendChild(inp);
+  const zet = v => gPost({ actie:'wijzig', id, tot:v }).then(d => { if (d) renderGeheugen(); });
+  inp.onchange = () => { if (inp.value) zet(inp.value); inp.remove(); };
+  try { inp.showPicker(); }
+  catch(e){ inp.remove();
+    const d = prompt('Geldig tot (JJJJ-MM-DD, leeg = blijvend):');
+    if (d !== null && (d.trim() === '' || /^\d{4}-\d{2}-\d{2}$/.test(d.trim()))) zet(d.trim()); }
+}
+async function gNieuw(){
+  const t = document.getElementById('gTekst');
+  if (!t.value.trim()) return;
+  const d = await gPost({ actie:'nieuw', tekst:t.value, over:document.getElementById('gOver').value,
+                          tot:document.getElementById('gTot').value });
+  if (d) { toon('🧠 Onthouden'); renderGeheugen(); }
+}
+async function gClaudeWeg(naam){
+  if (!confirm('Dit oude geheugenbestand definitief verwijderen?')) return;
+  if (await gPost({ actie:'claude-weg', naam })) renderGeheugen();
+}
+async function gOverzetten(){
+  await stuur('Zet je oude Claude-geheugen over naar je geheugenlijst (met einddatums waar iets tijdgebonden is), sla verouderde punten over, en verwijder daarna de oude bestanden.');
+  renderGeheugen();
 }

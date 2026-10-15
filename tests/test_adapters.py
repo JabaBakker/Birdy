@@ -508,6 +508,101 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         from agent import gdrive
         self.assertEqual(gdrive._q("Huis & tuin's"), "Huis & tuin\\'s")
 
+    def test_geheugen(self):
+        from datetime import date
+        from agent import geheugen
+        pad = geheugen._pad()
+        pad.unlink(missing_ok=True)
+        d = date(2026, 10, 15)
+        a = geheugen.voeg_toe("Chloe wil een tekenset", over="Chloe", soort="cadeau", tot="2026-10-20", vandaag=d)
+        b = geheugen.voeg_toe("Evi is allergisch voor noten", over="Evi", soort="persoon", vandaag=d)
+        # zelfde tekst + onderwerp → geen dubbel punt, wel bijgewerkte einddatum
+        a2 = geheugen.voeg_toe("chloe wil een tekenset", over="chloe", soort="cadeau", tot="25-10-2026", vandaag=d)
+        self.assertEqual(a2["id"], a["id"])
+        self.assertEqual(a2["tot"], "2026-10-25")
+        self.assertEqual(len(geheugen.alle(d)), 2)
+        with self.assertRaises(ValueError):
+            geheugen.voeg_toe("   ", vandaag=d)
+        with self.assertRaises(ValueError):
+            geheugen.voeg_toe("x", tot="morgen", vandaag=d)
+        # na de einddatum: niet meer in de prompt, wel zichtbaar als verlopen
+        later = date(2026, 10, 26)
+        self.assertIn("tekenset", geheugen.als_prompt(d))
+        self.assertNotIn("tekenset", geheugen.als_prompt(later))
+        self.assertIn("noten", geheugen.als_prompt(later))
+        self.assertEqual([p["status"] for p in geheugen.alle(later) if p["id"] == a["id"]], ["verlopen"])
+        # vergeten en terughalen
+        geheugen.vergeet(b["id"], vandaag=later)
+        self.assertEqual(geheugen.als_prompt(later), "(nog niets — je geheugen is leeg)")
+        geheugen.wijzig(b["id"], vergeten=False)
+        self.assertIn("noten", geheugen.als_prompt(later))
+        with self.assertRaises(KeyError):
+            geheugen.vergeet("g-bestaatniet")
+        # opruimen: verlopen > 30 dagen geleden verdwijnt, blijvende punten blijven
+        self.assertEqual(geheugen.opruimen(date(2026, 11, 20)), 0)
+        self.assertEqual(geheugen.opruimen(date(2026, 11, 30)), 1)
+        self.assertEqual([p["id"] for p in geheugen.alle(date(2026, 11, 30))], [b["id"]])
+        pad.unlink(missing_ok=True)
+
+    async def test_dashboard_geheugen(self):
+        import tempfile
+        from agent import geheugen
+        from agent.dashboard import Dashboard
+        geheugen._pad().unlink(missing_ok=True)
+        tmp = tempfile.TemporaryDirectory()
+        oud = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = tmp.name
+        mem = Path(tmp.name) / "projects" / "-data-workspace" / "memory"
+        mem.mkdir(parents=True)
+        (mem / "MEMORY.md").write_text("- kado Chloe: tekenset")
+        (Path(tmp.name) / "geheim.md").write_text("niet aankomen")
+        cfg = Config(dashboard_token="geheim", dashboard_port=18812)
+        d = Dashboard(cfg, FakeBrain(), asyncio.Lock(), [])
+        await d.start()
+        url = "http://127.0.0.1:18812/api/geheugen"
+        h = {"X-Dashboard-Key": "geheim"}
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url) as r:
+                    self.assertEqual(r.status, 401)
+                async with s.post(url, json={"actie": "nieuw", "tekst": "Oma houdt van tulpen", "over": "Oma"},
+                                  headers=h) as r:
+                    self.assertEqual(r.status, 200)
+                    pid = (await r.json())["punt"]["id"]
+                async with s.post(url, json={"actie": "nieuw", "tekst": "x", "tot": "gisteren"}, headers=h) as r:
+                    self.assertEqual(r.status, 400)
+                async with s.post(url, json={"actie": "vergeet", "id": pid}, headers=h) as r:
+                    self.assertEqual(r.status, 200)
+                async with s.get(url, headers=h) as r:
+                    data = await r.json()
+                    self.assertEqual(data["actief"], [])
+                    self.assertEqual([p["id"] for p in data["vergeten"]], [pid])
+                    self.assertEqual([b["naam"] for b in data["claude"]], ["-data-workspace/MEMORY.md"])
+                async with s.post(url, json={"actie": "herstel", "id": pid}, headers=h) as r:
+                    self.assertEqual(r.status, 200)
+                async with s.post(url, json={"actie": "wijzig", "id": pid, "tot": "2026-12-31"}, headers=h) as r:
+                    self.assertEqual((await r.json())["punt"]["tot"], "2026-12-31")
+                async with s.post(url, json={"actie": "vergeet", "id": "g-nope"}, headers=h) as r:
+                    self.assertEqual(r.status, 404)
+                # alleen bestanden ín de memory-map mogen weg
+                async with s.post(url, json={"actie": "claude-weg", "naam": "-data-workspace/../../../geheim.md"},
+                                  headers=h) as r:
+                    self.assertEqual(r.status, 404)
+                self.assertTrue((Path(tmp.name) / "geheim.md").exists())
+                async with s.post(url, json={"actie": "claude-weg", "naam": "-data-workspace/MEMORY.md"},
+                                  headers=h) as r:
+                    self.assertEqual(r.status, 200)
+                self.assertFalse((mem / "MEMORY.md").exists())
+        finally:
+            await d.stop()
+            geheugen._pad().unlink(missing_ok=True)
+            if oud is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = oud
+            tmp.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

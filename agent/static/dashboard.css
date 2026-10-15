@@ -520,3 +520,35 @@
 .gp-partij { cursor:pointer; }
 .gp-tx { font-size:.85rem; color:var(--dim); display:grid; grid-template-columns:5.2rem 1fr auto; gap:.4rem; padding:.15rem 0 .15rem .5rem; border-left:2px solid var(--lijn); }
 .gp-tx b { color:var(--ink); font-weight:500; white-space:nowrap; }
+
+/* ── geheugen ── */
+#paneelGeheugen { max-width:1100px; margin:0 auto; }
+.geheugen-kop { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; margin-bottom:.8rem; }
+.geheugen-kop h2 { font-size:1.15rem; }
+.geheugen-kop .notitie, .gnieuw .notitie { color:var(--dim); font-size:.85rem; }
+#paneelGeheugen button.klein { border:1px solid var(--lijn); background:var(--panel); color:var(--ink);
+  border-radius:9px; padding:.3rem .7rem; font-size:.85rem; cursor:pointer; }
+.gnieuw { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin-bottom:.8rem; }
+.gnieuw input { background:var(--bg); border:1px solid var(--lijn); color:var(--ink); border-radius:10px;
+  padding:.5rem .7rem; font:inherit; }
+.gnieuw #gTekst { flex:1 1 16rem; }
+.gnieuw #gOver { flex:0 1 11rem; }
+.ggrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:.8rem; align-items:start; }
+.gkaart ul { list-style:none; padding:0; }
+.gpunt { display:flex; flex-direction:column; gap:.4rem; padding:.55rem 0; border-top:1px solid var(--lijn); }
+.gpunt:first-child { border-top:none; }
+.gpunt small { display:block; color:var(--dim); font-size:.78rem; margin-top:.15rem; }
+.gpunt.verlopen span, .gpunt.vergeten span { color:var(--dim); text-decoration:line-through; }
+.gknoppen { display:flex; gap:.3rem; align-items:center; flex-wrap:wrap; }
+.gpil { font-size:.75rem; border-radius:99px; padding:.2rem .55rem; background:rgba(127,191,166,.15);
+  color:var(--accent); white-space:nowrap; align-self:center; }
+.gpil.oud { background:rgba(224,122,106,.15); color:var(--rood); }
+.gpil.blijvend { background:rgba(255,255,255,.06); color:var(--dim); }
+.gsectie { margin-top:1rem; }
+.gsectie summary { cursor:pointer; color:var(--dim); }
+.gsectie pre { white-space:pre-wrap; word-break:break-word; font-size:.82rem; background:var(--bg);
+  border:1px solid var(--lijn); border-radius:10px; padding:.7rem; margin:.4rem 0; max-height:50vh; overflow:auto; }
+.gwaarschuwing { border-color:var(--amber); margin-bottom:.8rem; }
+/* vijf tabs passen niet op een smalle telefoon: tabbalk mag dan horizontaal schuiven */
+@media (max-width:480px){ #tabs { max-width:100%; overflow-x:auto; scrollbar-width:none; }
+  #tabs::-webkit-scrollbar { display:none; } #tabs button { white-space:nowrap; flex:0 0 auto; } }
