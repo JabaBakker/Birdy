@@ -3,6 +3,7 @@
 De agent roept dit aan via Bash:
     python /app/agent/todoist.py add "kwark" --lijst boodschappen
     python /app/agent/todoist.py add "band plakken" --lijst acties --wanneer "zaterdag"
+    python /app/agent/todoist.py add "Zwemles Evi: aanmelden (Yvette)" --lijst acties --wanneer "1 nov" --notitie "..."
     python /app/agent/todoist.py list --lijst boodschappen
     python /app/agent/todoist.py done "kwark" --lijst boodschappen
     python /app/agent/todoist.py projects
@@ -73,9 +74,11 @@ def cmd_projects() -> None:
         print(f"- {p['name']}")
 
 
-def cmd_add(content: str, lijst: str, wanneer: str | None) -> None:
+def cmd_add(content: str, lijst: str, wanneer: str | None, notitie: str | None = None) -> None:
     project = _project(lijst)
     body: dict = {"content": content, "project_id": project["id"]}
+    if notitie:
+        body["description"] = notitie
     if wanneer:
         body["due_string"] = wanneer
         body["due_lang"] = "nl"
@@ -211,6 +214,7 @@ def main() -> None:
     pa.add_argument("content")
     pa.add_argument("--lijst", required=True, help="bijv. boodschappen of acties")
     pa.add_argument("--wanneer", help='bijv. "morgen" of "zaterdag" (Nederlands mag)')
+    pa.add_argument("--notitie", help="details, uitzoekwerk of vervolgstappen bij de actie")
     pl = sub.add_parser("list")
     pl.add_argument("--lijst")
     pd = sub.add_parser("done")
@@ -224,7 +228,7 @@ def main() -> None:
     args = p.parse_args()
 
     if args.cmd == "add":
-        cmd_add(args.content, args.lijst, args.wanneer)
+        cmd_add(args.content, args.lijst, args.wanneer, args.notitie)
     elif args.cmd == "list":
         cmd_list(args.lijst)
     elif args.cmd == "done":

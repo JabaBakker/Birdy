@@ -182,7 +182,8 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                                  headers={"X-Dashboard-Key": "geheim"}) as r:
                     self.assertEqual(r.status, 200)
                     data = await r.json()
-                    for veld in ("agenda", "onderwerpen", "aandacht", "boodschappen", "acties",
+                    self.assertNotIn("onderwerpen", data)
+                    for veld in ("agenda", "aandacht", "boodschappen", "acties",
                                  "verjaardagen"):
                         self.assertIn(veld, data)
                     self.assertEqual(data["aandacht"]["birdy"]["items"], [])
@@ -283,23 +284,6 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(c["boodschappen"][0]["tekst"], "kwark")
         self.assertEqual(c["boodschappen_af"], [])
 
-    def test_onderwerpen_parse(self):
-        from datetime import date
-        from agent.bronnen import onderwerpen_parse
-        vandaag = date(2026, 9, 2)
-        items = onderwerpen_parse(
-            "WAT LOOPT ER\n\nGrotere onderwerpen met een eigenaar.\n\n"
-            "• Kinderfeest Evi — wie: Jaap · wanneer: 06-09 · stap: gastenlijst invullen\n"
-            "• KPN moeder — wie: Jaap · wanneer: n.t.b. · notitie: Youfone vanaf €42\n"
-            "• Cadeau Evi — wie: Jaap · wanneer: 31-08-2026 · stap: checken\n\n"
-            "Afgerond\n• Oppas geregeld — wie: Jaap\n", vandaag)
-        self.assertEqual([o["naam"] for o in items], ["Cadeau Evi", "Kinderfeest Evi", "KPN moeder"])
-        self.assertEqual(items[0]["dagen"], -2)
-        self.assertEqual(items[1]["dagen"], 4)
-        self.assertEqual(items[1]["stap"], "gastenlijst invullen")
-        self.assertIsNone(items[2]["dagen"])
-        self.assertEqual(items[2]["notitie"], "Youfone vanaf €42")
-
     def test_signalen(self):
         from datetime import date
         from agent.signalen import bereken
@@ -311,12 +295,10 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             week=[{"start": "2026-09-02T11:00", "eind": "2026-09-02T12:00", "titel": "Feestje"},
                   {"start": "2026-09-02T11:30", "eind": "2026-09-02T13:00", "titel": "Bezoek oma"},
                   {"start": "2026-09-02", "eind": "2026-09-03", "titel": "Hele dag"}],
-            onderwerpen=[{"naam": "Kinderfeest", "dagen": 0, "stap": "gastenlijst"}],
             vandaag=vandaag)
         teksten = [s["tekst"] for s in sig]
         self.assertTrue(any(t.startswith("1 actie over de datum") for t in teksten))
         self.assertFalse(any(t.startswith("Vandaag:") for t in teksten))  # staat al in de actiekolom
-        self.assertIn("📂 Kinderfeest: vandaag — gastenlijst", teksten)
         self.assertIn("🔁 Kapper Evi is 3 dagen over tijd (Jaap)", teksten)
         self.assertIn("🎂 Avie morgen, nog geen cadeau-idee", teksten)
         self.assertTrue(any(t.startswith("⚠️ Overlap vandaag 11:00") for t in teksten))
@@ -493,16 +475,6 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         cats = bank.categorieen(bank.laad(ws), 6)
         self.assertTrue(any(c["categorie"] == "Kinderen" for c in cats)); self.assertFalse(any("Overboeking" in c["categorie"] for c in cats))
         (ws / "memory" / "transacties.json").unlink(missing_ok=True)
-
-    def test_dubbelingen(self):
-        from agent.signalen import dubbelingen
-        acties = [{"tekst": "Cadeau kopen voor Evi's verjaardag"},
-                  {"tekst": "Kinderfeest Evi: gastenlijst invullen"},
-                  {"tekst": "Dierenarts bellen voor de kat"}]
-        onderwerpen = [{"naam": "Cadeau voor Evi's verjaardag"}, {"naam": "Kinderfeest Evi organiseren"},
-                       {"naam": "Kattenrollen voor op de schutting"}]
-        self.assertEqual(dubbelingen(acties, onderwerpen),
-                         [("Cadeau kopen voor Evi's verjaardag", "Cadeau voor Evi's verjaardag")])
 
     def test_gdrive_query_escaping(self):
         from agent import gdrive

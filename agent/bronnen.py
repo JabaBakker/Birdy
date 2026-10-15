@@ -1,4 +1,4 @@
-"""Gezinsbronnen voor het dashboard: het Google Doc "Wat loopt er" (onderwerpen), het
+"""Gezinsbronnen voor het dashboard: het
 huishoudhandboek (regelzaken), de verjaardagenlijst, Birdy's AANDACHT.md en Homey."""
 from __future__ import annotations
 
@@ -29,41 +29,6 @@ def datum_dagen(tekst: str, vandaag: date | None = None) -> int | None:
         return None
 
 
-def onderwerpen_parse(text: str, vandaag: date | None = None) -> list[dict]:
-    """Lopende onderwerpen uit het Google Doc 'Wat loopt er'. Regelformat:
-    • Kinderfeest Evi — wie: Jaap · wanneer: 06-09 · stap: gastenlijst invullen · notitie: …
-    Regels onder een kop 'Afgerond' of beginnend met ✅ tellen niet mee."""
-    import re
-
-    def veld(s: str, naam: str) -> str:
-        m = re.search(r"\b" + naam + r"\s*:\s*([^·]+)", s, re.I)
-        return m.group(1).strip() if m else ""
-
-    out, klaar = [], False
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        if re.match(r"^(#+\s*)?(afgerond|klaar|gedaan)\b", s, re.I):
-            klaar = True
-            continue
-        if not s.startswith(("•", "-", "*", "✅")):
-            continue
-        if klaar or s.startswith("✅") or "✅" in s[:3]:
-            continue
-        s = s.lstrip("•-* ").strip()
-        naam = re.split(r"\s+[—–-]\s+|\s+·\s+", s)[0].strip()
-        if not naam:
-            continue
-        wanneer = veld(s, "wanneer")
-        out.append({
-            "naam": naam[:80], "wie": veld(s, "wie")[:30], "wanneer": wanneer[:30],
-            "dagen": datum_dagen(wanneer, vandaag) if wanneer else None,
-            "stap": veld(s, "(?:volgende )?stap")[:160], "notitie": veld(s, "notitie")[:300],
-        })
-    out.sort(key=lambda o: (o["dagen"] is None, o["dagen"] if o["dagen"] is not None else 0))
-    return out[:30]
-
 
 def doc_tekst(pad: str) -> str:
     """Platte tekst van een Google Doc in de Drive-hub; '' als hij er niet is of Drive uit staat."""
@@ -78,13 +43,6 @@ def doc_tekst(pad: str) -> str:
         return text.decode("utf-8", errors="replace") if isinstance(text, bytes) else text
     except BaseException:
         return ""
-
-
-ONDERWERPEN_DOC = "Wat loopt er"
-
-
-def onderwerpen() -> list[dict]:
-    return onderwerpen_parse(doc_tekst(ONDERWERPEN_DOC))
 
 
 def aandacht_birdy(workspace: Path) -> dict:

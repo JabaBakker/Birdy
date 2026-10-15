@@ -100,7 +100,7 @@ function ico(titel, bron){
 }
 function aandachtKaart(s, i){
   // regel-signaal als kaartje: kopje op bron, tekst, en één knop als er iets te doen valt
-  const kop = { acties: 'Acties', regelzaken: 'Regelzaak', verjaardagen: 'Verjaardag', onderwerpen: 'Onderwerp',
+  const kop = { acties: 'Acties', regelzaken: 'Regelzaak', verjaardagen: 'Verjaardag',
                 week: 'Agenda' }[s.l2] || 'Signaal';
   const kl = s.ernst === 0 ? 'var(--rood)' : 'var(--amber)';
   const open = s.l2 === 'week' ? "kiesTab('week')" : `openL2('${s.l2}')`;
@@ -257,7 +257,7 @@ function renderL2(){
   if (!L2open || !DATA) return;
   if (L2open === 'geldpop') return;  // pop-out van de Geld-tab beheert zijn eigen inhoud
   document.getElementById('l2Titel').textContent = {
-    onderwerpen: '📂 Onderwerpen — wat loopt er', aandacht: '💡 Aandacht',
+    aandacht: '💡 Aandacht',
     zoek: '🔍 Zoeken in de agenda',
     boodschappen: '🛒 Boodschappen',
     acties: '⚡ Acties — alles', verjaardagen: '🎂 Verjaardagen & cadeau-ideeën',
@@ -308,19 +308,7 @@ function renderL2(){
       : '<li class="leeg">Nog geen regelzaken — zeg tegen Birdy: "de grijze bak gaat elke 2 weken aan straat".</li>') + '</ul>';
     document.getElementById('l2Inhoud').innerHTML = html; return;
   }
-  if (L2open === 'onderwerpen'){
-    const items = filterItems(DATA.onderwerpen || [], o => o.naam + ' ' + o.wie);
-    html = filterChips() + '<ul>' + (items.length ? items.map(o =>
-      `<li><span>${esc(o.naam)}${o.wie ? persChip(o.wie) : ''}` +
-      (o.dagen !== null ? `<span class="due ${o.dagen < 0 ? 'laat' : o.dagen <= 1 ? 'nu' : 'straks'}">` +
-        `${esc(o.wanneer)}${o.dagen === 0 ? ' · vandaag' : o.dagen === 1 ? ' · morgen' : o.dagen < 0 ? ' · te laat' : ''}</span>`
-        : (o.wanneer ? `<span class="due straks">${esc(o.wanneer)}</span>` : '')) +
-      (o.stap ? `<br><span class="notitie">→ ${esc(o.stap)}</span>` : '') +
-      (o.notitie ? `<br><span class="notitie">${esc(o.notitie)}</span>` : '') +
-      `</span></li>`).join('')
-      : '<li class="leeg">niets voor dit filter</li>') + '</ul>';
-    html += `<p class="notitie" style="margin-top:.8rem">Uit het Google Doc “Wat loopt er” in de Drive-map — Birdy houdt het bij; zelf aanpassen mag ook.</p>`;
-  } else if (L2open === 'zoek'){
+  if (L2open === 'zoek'){
     const z = ZOEK;
     html = `<p class="notitie">“${esc(z.term)}” · 3 maanden terug t/m 18 maanden vooruit</p>`;
     if (z.items === null) html += '<p class="leeg">zoeken…</p>';
@@ -344,7 +332,7 @@ function renderL2(){
       (b.tijd && b.items.length ? ` <span class="notitie">· ${esc(b.tijd)}</span>` : '') + '</h4><ul>' +
       (b.items.length ? b.items.map(x => `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`).join('')
         : `<li class="leeg">${b.oud ? 'de vorige punten zijn ouder dan drie dagen' : 'nog niets'} — vraag Birdy hieronder om een verse blik, of wacht op de ochtendupdate van 07:15</li>`) + '</ul>';
-    html += `<button class="blikknop" onclick="sluitL2(); stuur('Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties, onderwerpen en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.')">🐦 Vraag Birdy om een verse blik</button>`;
+    html += `<button class="blikknop" onclick="sluitL2(); stuur('Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.')">🐦 Vraag Birdy om een verse blik</button>`;
     html += '<h4>Signalen uit agenda, acties en handboek</h4>' +
       ((a.signalen || []).length ? a.signalen.map(aandachtKaart).join('') : '<p class="leeg">niets dat aandacht vraagt 🙂</p>');
   } else if (L2open === 'boodschappen' || L2open === 'acties'){
@@ -759,15 +747,6 @@ async function ververs(){
     const restN = (bItems.length - bTonen.length) + (sig.length - sTonen.length);
     document.getElementById('aandachtrest').innerHTML = restN > 0
       ? `<span class="klik" onclick="openL2('aandacht')">nog ${restN} ${restN > 1 ? 'punten' : 'punt'} — alles ↗</span>` : '';
-    // zijbalk: onderwerpen
-    const mo = d.onderwerpen || [];
-    document.getElementById('moCount').textContent = mo.length || '';
-    document.getElementById('moList').innerHTML = mo.length
-      ? mo.slice(0, 3).map(o => `<li><span>${esc(o.naam)}</span>` +
-          `<small class="${o.dagen !== null && o.dagen < 0 ? 'laat' : o.dagen === 0 || o.dagen === 1 ? 'nu' : ''}">` +
-          `${o.dagen !== null ? dagenLabel(o.dagen) : esc(o.wanneer || '')}</small></li>`).join('') +
-        (mo.length > 3 ? `<li class="meer">… nog ${mo.length - 3}</li>` : '')
-      : '<li class="leeg">niets lopends 🎉</li>';
     document.getElementById('acties').innerHTML = actiesGroepen(d.acties || [], 40);
     actiesRing(d.acties || [], d.acties_af || []);
     const afWrap = document.getElementById('actiesAfWrap');

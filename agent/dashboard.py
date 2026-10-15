@@ -5,7 +5,7 @@ ontsluiting gebeurt via Tailscale (tailscale serve → HTTPS, nodig voor de micr
 Aan/uit via DASHBOARD_TOKEN in .env: leeg = dashboard uit.
 
 - GET  /                → kioskpagina (dark, auto-verversend, microfoonknop)
-- GET  /api/overview    → agenda, onderwerpen (Doc "Wat loopt er"), aandacht (regels +
+- GET  /api/overview    → agenda, aandacht (regels +
                           Birdy's briefingpunten uit AANDACHT.md), lijstjes, verjaardagen,
                           regelzaken, thuis (JSON, cache 2 min)
 - POST /api/message     → {"text": ...} → zelfde brein als de chat; antwoord terug + echo in Slack
@@ -33,7 +33,7 @@ STATIC_BESTANDEN = ("dashboard.css", "dashboard.js", "manifest.webmanifest", "sw
                     "icon-192.png", "icon-512.png")
 PLAN_MAX_BYTES = 60_000  # gedeelde kinderplanning (planning.json) blijft klein
 # werkbestanden die Birdy zelf bijhoudt; de Geheugen-tab toont ze (alleen-lezen)
-WERKBESTANDEN = ("GEZIN.md", "VOORKEUREN.md", "INTENTIES.md", "HERHALEND.md", "TAKEN.md", "AANDACHT.md")
+WERKBESTANDEN = ("GEZIN.md", "VOORKEUREN.md", "INTENTIES.md", "HERHALEND.md", "AANDACHT.md")
 BESTAND_MAX = 40_000  # tekens per getoond bestand
 
 
@@ -613,16 +613,15 @@ class Dashboard:
     async def _bouw(self) -> dict:
         gen = self._gen
         if not self._traag or time.time() - self._traag_ts > CACHE_TTL:
-            (week, compleet), jarigen, regelzaken, thuis, onderwerpen = await asyncio.gather(
+            (week, compleet), jarigen, regelzaken, thuis = await asyncio.gather(
                 asyncio.to_thread(agenda.rijk),
                 asyncio.to_thread(bronnen.verjaardagen),
                 asyncio.to_thread(bronnen.regelzaken),
                 asyncio.to_thread(bronnen.thuis),
-                asyncio.to_thread(bronnen.onderwerpen),
             )
             if compleet or not self._traag:
                 self._traag = {"week": week, "verjaardagen": jarigen, "regelzaken": regelzaken,
-                               "thuis": thuis, "onderwerpen": onderwerpen}
+                               "thuis": thuis}
                 self._traag_ts = time.time()
             else:
                 # een bron faalde: houd de vorige complete week vast en probeer bij de
@@ -630,23 +629,20 @@ class Dashboard:
                 self._traag["verjaardagen"] = jarigen
                 self._traag["regelzaken"] = regelzaken
                 self._traag["thuis"] = thuis or self._traag.get("thuis")
-                self._traag["onderwerpen"] = onderwerpen
         boodschappen, acties, boodschappen_af, acties_af = await asyncio.gather(
             asyncio.to_thread(todoist.lijst, "boodschappen"),
             asyncio.to_thread(todoist.lijst, "acties"),
             asyncio.to_thread(todoist.afgevinkt, "boodschappen"),
             asyncio.to_thread(todoist.afgevinkt, "acties"),
         )
-        onderwerpen = self._traag.get("onderwerpen", [])
         vers = {
             "agenda": agenda.compact(self._traag["week"]),
             "week": self._traag["week"],
             "personen": self.cfg.dashboard_personen,
-            "onderwerpen": onderwerpen,
             "aandacht": {
                 "birdy": bronnen.aandacht_birdy(self.cfg.workspace),
                 "signalen": signalen.bereken(acties, self._traag.get("regelzaken", []),
-                                      self._traag["verjaardagen"], self._traag["week"], onderwerpen)
+                                      self._traag["verjaardagen"], self._traag["week"])
                             + (((await self._geld_lees()).get("signalen", []))[:3] if self.cfg.dashboard_geld_pin else []),
             },
             "geld_tab": bool(self.cfg.dashboard_geld_pin),

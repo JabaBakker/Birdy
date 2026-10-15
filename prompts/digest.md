@@ -1,18 +1,16 @@
 Ochtendbriefing — {now}
 
-1. Lees `TAKEN.md`, `GEZIN.md` en `VOORKEUREN.md`, en haal op (fouten = overslaan):
+1. Lees `GEZIN.md` en `VOORKEUREN.md`, en haal op (fouten = overslaan):
    - de agenda: `python /app/agent/gcal.py list --days 2`
-   - de onderwerpen: `python /app/agent/gdrive.py read "Wat loopt er"`
-     → wijkt het Doc af van TAKEN.md (het gezin heeft iets aangepast), neem dat over
+   - de acties: `python /app/agent/todoist.py list --lijst acties`
    - het handboek: `python /app/agent/gdrive.py read "20 Huishouden/Huishoudhandboek"`
      → staat er iets met "volgende" op of vóór vandaag, benoem het in de briefing en
      stel voor er een actie van te maken
    - de verjaardagen: `python /app/agent/gdrive.py read "20 Huishouden/Verjaardagen"`
      → verjaardag binnen 7 dagen? Benoem hem en vraag (max 1×) of er een cadeau-actie
      op de actielijst moet.
-   Verschuif onderwerpen die vandaag/deze week horen naar de juiste sectie, signaleer
-   deadlines die naderen of verstreken zijn, en werk het Doc "Wat loopt er" bij als er
-   iets veranderde.
+   Signaleer deadlines die naderen of verstreken zijn. Een actie die al lang over de
+   datum is: benoem hem met eigenaar en stel een nieuwe datum voor.
 2. Schrijf `AANDACHT.md` (format in je instructies): maximaal drie punten die vandaag
    écht aandacht verdienen, elk één concrete zin met naam. Dit is jouw blik over alles
    heen; het dashboard toont het de hele dag. Is er niets bijzonders, schrijf dan één
