@@ -136,6 +136,7 @@ function jarigRij(j){
 
 // ── verdiepende pagina's (L2) ─────────────────────────────────────────────
 let DATA = null, L2open = null, L2filter = 'alle';
+const AANDACHT_VRAAG = 'Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.';
 function openL2(naam){ L2open = naam; L2filter = 'alle';
   document.getElementById('l2').style.display = 'flex'; renderL2(); }
 function sluitL2(){ L2open = null; document.getElementById('l2').style.display = 'none'; }
@@ -332,7 +333,7 @@ function renderL2(){
       (b.tijd && b.items.length ? ` <span class="notitie">· ${esc(b.tijd)}</span>` : '') + '</h4><ul>' +
       (b.items.length ? b.items.map(x => `<li class="birdy"><img src="/logo-bird.png" class="bird" onerror="this.replaceWith('🐦')"><span>${esc(x)}</span></li>`).join('')
         : `<li class="leeg">${b.oud ? 'de vorige punten zijn ouder dan drie dagen' : 'nog niets'} — vraag Birdy hieronder om een verse blik, of wacht op de ochtendupdate van 07:15</li>`) + '</ul>';
-    html += `<button class="blikknop" onclick="sluitL2(); stuur('Werk je aandachtspunten bij (AANDACHT.md): kijk over agenda, acties en handboek heen en geef me de drie punten die nu het meest aandacht verdienen.')">🐦 Vraag Birdy om een verse blik</button>`;
+    html += `<button class="blikknop" onclick="sluitL2(); stuur(AANDACHT_VRAAG)">🐦 Vraag Birdy om een verse blik</button>`;
     html += '<h4>Signalen uit agenda, acties en handboek</h4>' +
       ((a.signalen || []).length ? a.signalen.map(aandachtKaart).join('') : '<p class="leeg">niets dat aandacht vraagt 🙂</p>');
   } else if (L2open === 'boodschappen' || L2open === 'acties'){
@@ -2043,6 +2044,23 @@ function mRij(lijst, x){
     `</li>`;
 }
 function mVink(knop, id){ vink(knop.closest('li'), id); }
+var M_AANDACHT_BEZIG = false;
+async function mAandachtVernieuw(){
+  // aandachtspunten ter plekke laten bijwerken; vraag en antwoord komen ook in de chat
+  if (M_AANDACHT_BEZIG) return;
+  M_AANDACHT_BEZIG = true; mRender();
+  try {
+    const r = await fetch('/api/message', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify({ text: AANDACHT_VRAAG }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '');
+    chatGesch.push({ wie: 'ik', tekst: '↻ Verse blik op de aandachtspunten' }, { wie: 'birdy', tekst: d.reply || '' });
+    chatBewaar();
+  } catch(e){ toon('Bijwerken lukte even niet — probeer het zo nog eens.'); }
+  M_AANDACHT_BEZIG = false;
+  await ververs(); mRender();
+}
 function mRender(){
   if (!MOBIEL || !DATA) return;
   const d = DATA;
@@ -2051,8 +2069,13 @@ function mRender(){
   // Birdy's aandachtspunten bovenaan de acties
   const b = (d.aandacht || {}).birdy || {};
   const punten = (b.items || []).slice(0, 3);
-  document.getElementById('mAandacht').innerHTML = punten.length
-    ? `<div class="mkaart"><b>💡 Birdy</b><ul>${punten.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : '';
+  const inhoud = M_AANDACHT_BEZIG ? '<p class="leeg">Birdy kijkt over agenda, acties en handboek heen…</p>'
+    : punten.length ? `<ul>${punten.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`
+    : `<p class="leeg">${b.oud ? 'De vorige punten zijn ouder dan drie dagen.' : 'Nog geen aandachtspunten.'}</p>`;
+  document.getElementById('mAandacht').innerHTML = `<div class="mkaart"><div class="mkaartkop"><b>💡 Birdy</b>` +
+    (b.tijd && !M_AANDACHT_BEZIG ? `<small>${esc(b.tijd)}</small>` : '') +
+    `<button class="mvernieuw" onclick="mAandachtVernieuw()"${M_AANDACHT_BEZIG ? ' disabled' : ''}>` +
+    `${M_AANDACHT_BEZIG ? '…even kijken' : '↻ Verse blik'}</button></div>${inhoud}</div>`;
   // acties: Nu · Binnenkort · Later
   const acties = d.acties || [];
   const nu = new Date(); nu.setHours(0,0,0,0);

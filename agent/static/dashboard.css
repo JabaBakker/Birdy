@@ -636,3 +636,9 @@ body.mobiel .ggrid { grid-template-columns:1fr; }
 /* viewport-fit=cover: op een iPad-beginscherm niet onder de statusbalk schuiven */
 body:not(.mobiel) { padding-top:max(1.1rem, env(safe-area-inset-top));
   padding-left:max(1.1rem, env(safe-area-inset-left)); padding-right:max(1.1rem, env(safe-area-inset-right)); }
+.mkaartkop { display:flex; align-items:center; gap:.5rem; }
+.mkaartkop small { color:var(--dim); font-size:.75rem; }
+.mvernieuw { margin-left:auto; border:1px solid var(--lijn); background:var(--bg); color:var(--ink);
+  border-radius:99px; padding:.3rem .75rem; font-size:.82rem; }
+.mvernieuw:disabled { color:var(--dim); }
+.mkaart .leeg { margin:.4rem 0 0; font-size:.88rem; }
