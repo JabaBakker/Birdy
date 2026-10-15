@@ -1432,19 +1432,43 @@ function toonMetKnop(t, knoptekst, actie){
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, luistert = false;
+// iPhone/iPad-beginscherm-app: de spraakherkenning van de browser start daar wel (je hoort
+// het piepje) maar levert nooit tekst op. Daar gebruiken we de dicteerknop van het toetsenbord.
+const IOS_APP = /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+  (navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches);
+function spraakVeld(cb){
+  if (cb === tvStuur) return document.getElementById('tvVeld');
+  if (typeof MOBIEL !== 'undefined' && MOBIEL) return document.getElementById('mVeld');
+  return document.getElementById(document.getElementById('chat').classList.contains('open') ? 'chatveld' : 'invoer');
+}
+function dicteerViaToetsenbord(veld){
+  veld.focus();
+  toon('🎤 Tik op de microfoon van je toetsenbord, spreek in en tik daarna op →.');
+}
 function spraak(knop, cb){
-  if (!SR) {
-    if (!cb) { chatOpen(true); document.getElementById('chatveld').focus(); }
-    toon('🎤 Spraak werkt in Chrome of Safari — typen kan altijd.');
-    return;
-  }
+  const veld = spraakVeld(cb);
+  if (!SR || IOS_APP) { dicteerViaToetsenbord(veld); return; }
   if (luistert) { rec.stop(); return; }
-  rec = new SR(); rec.lang = 'nl-NL'; rec.interimResults = false;
+  let tekst = '', fout = false;
+  rec = new SR(); rec.lang = 'nl-NL';
+  rec.interimResults = true;   // tekst verschijnt al tijdens het praten in het invoerveld
+  rec.continuous = true;       // luisteren tot je nog een keer op de knop tikt
   rec.onstart = () => { luistert = true; knop.classList.add('luistert'); };
-  rec.onend = () => { luistert = false; knop.classList.remove('luistert'); };
-  rec.onerror = () => toon('🎤 Ik kon je niet verstaan — probeer nog eens.');
-  rec.onresult = ev => (cb || stuur)(ev.results[0][0].transcript);
-  rec.start();
+  rec.onresult = ev => {
+    tekst = Array.from(ev.results).map(r => r[0].transcript).join(' ').replace(/\s+/g, ' ').trim();
+    veld.value = tekst;
+  };
+  rec.onerror = ev => {
+    fout = true;
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') dicteerViaToetsenbord(veld);
+    else if (ev.error !== 'aborted' && ev.error !== 'no-speech') toon('🎤 Ik kon je niet verstaan — probeer nog eens.');
+  };
+  rec.onend = () => {
+    luistert = false; knop.classList.remove('luistert');
+    if (tekst) (cb || stuur)(tekst);
+    else if (!fout) dicteerViaToetsenbord(veld);  // niets gehoord: val terug op het toetsenbord
+  };
+  try { rec.start(); } catch(e){ dicteerViaToetsenbord(veld); }
 }
 document.getElementById('invoer').addEventListener('keydown',
   e => { if (e.key === 'Enter' || e.keyCode === 13) stuur(e.target.value); });
