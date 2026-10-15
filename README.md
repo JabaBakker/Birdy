@@ -68,6 +68,29 @@ Eenmalig, op je eigen laptop:
    (`workspace/secrets/service-account.json` + uitschakelen in Google Cloud). Zolang
    de OAuth-variabelen leeg zijn, valt de agenda automatisch terug op het service-account.
 
+### Google-koppeling verlopen? (`invalid_grant`)
+
+Zolang de OAuth-app in **Testing** staat, verloopt het refresh-token na 7 dagen en valt
+Google (agenda, Drive, geld-tab) stil. Snel herstel, op je Mac:
+
+```bash
+pip install google-auth-oauthlib   # eenmalig
+./scripts/google_vernieuw.sh
+```
+
+Definitief oplossen (eenmalig):
+
+1. GitHub → Settings → Pages → Source = **GitHub Actions**. De workflow
+   `pages.yml` publiceert `site/` dan op <https://jababakker.github.io/Birdy/>.
+2. Google Cloud → **OAuth consent screen** (Google Auth Platform → Branding):
+   homepage `https://jababakker.github.io/Birdy/`, privacy
+   `https://jababakker.github.io/Birdy/privacy.html`.
+3. **Audience → Publish app** (In production). Verificatie is niet nodig voor eigen
+   gebruik; bij inloggen verschijnt "Google hasn't verified this app" → *Advanced* →
+   *Go to Birdy*.
+4. Draai `./scripts/google_vernieuw.sh` nog één keer: tokens uit de testperiode blijven
+   anders verlopen.
+
 Vraag daarna in de chat: "richt je archief in" — Birdy maakt zelf de mappenstructuur
 (00 Inbox, 10 Gezin, 20 Huishouden, 30 Financiën, 90 Archief). Bestanden die iemand in
 **00 Inbox** zet worden elke 5 minuten opgepikt en als voorstel in de chat gezet.

@@ -28,4 +28,4 @@ for i in $(seq 1 20); do
   sleep 3
 done
 ssh "$SERVER" "cd $DIR && K=\$(grep '^DASHBOARD_TOKEN=' .env | cut -d= -f2-); P=\$(grep '^DASHBOARD_GELD_PIN=' .env | cut -d= -f2-); curl -s -H \"X-Dashboard-Key: \$K\" -H \"X-Geld-Pin: \$P\" 'http://127.0.0.1:8811/api/geld?ververs=1'" | python3 -c "import json,sys; d=json.load(sys.stdin); print('Geld-register:', 'OK' if d.get('beschikbaar') else 'NIET beschikbaar: ' + str(d.get('fout')))"
-echo "Klaar. Let op: in testmodus verloopt dit token over 7 dagen weer; definitieve fix = OAuth-app publiceren (homepage + privacy-pagina)."
+echo "Klaar. Let op: in testmodus verloopt dit token over 7 dagen weer; definitieve fix: zie README, 'Google-koppeling verlopen?'."
