@@ -727,6 +727,7 @@ async function ververs(){
     document.getElementById('klok').textContent = d.nu;
     DATA = d;
     PERSONEN = d.personen || [];
+    if (MOBIEL) { document.body.classList.add('mobiel'); mRender(); }
     document.getElementById('tabGeld').style.display = d.geld_tab ? '' : 'none';
     if (WEEKOFFSET === 0){ WEEK = d.week || []; renderWeek(WEEK); }  // andere week: laten staan
     // vandaag-agenda: tijdlijn uit dezelfde weekdata (indexen verwijzen naar WEEK voor de detailkaart)
@@ -796,7 +797,8 @@ async function ververs(){
     renderL2();
   } catch (e) { /* volgende poging over 60s */ }
 }
-function toonSleutel(){ document.getElementById('app').style.display='none';
+function toonSleutel(){ document.body.classList.remove('mobiel');
+  document.getElementById('app').style.display='none';
   document.getElementById('sleutel').style.display='block'; }
 try {  // 'plan' wordt pas hersteld nadat de planningsfuncties geladen zijn (regel onderaan)
   const t0 = localStorage.getItem('birdy-tab') || 'vandaag';
@@ -1323,10 +1325,15 @@ let chatGesch = [];
 try { chatGesch = JSON.parse(localStorage.getItem('birdy-chat')) || []; } catch (e) {}
 function chatBewaar(){ try { localStorage.setItem('birdy-chat',
   JSON.stringify(chatGesch.slice(-60))); } catch (e) {} }
-function chatRender(){ const log = document.getElementById('chatlog');
-  log.innerHTML = chatGesch.map(m => `<div class="bub ${m.wie}">${esc(m.tekst)}</div>`).join('');
-  log.scrollTop = log.scrollHeight; }
+function chatRender(){
+  const html = chatGesch.map(m => `<div class="bub ${m.wie}">${esc(m.tekst)}</div>`).join('');
+  const log = document.getElementById('chatlog');
+  log.innerHTML = html; log.scrollTop = log.scrollHeight;
+  const ml = document.getElementById('mLog');
+  if (ml) { ml.innerHTML = html || mChatLeeg(); ml.scrollTop = ml.scrollHeight; mScrollOnder(); }
+}
 function chatOpen(open){
+  if (typeof MOBIEL !== 'undefined' && MOBIEL) { if (open) mKies('chat'); return; }
   document.getElementById('chat').classList.toggle('open', open);
   document.getElementById('chatfab').style.display = open ? 'none' : 'flex';
   if (open) { chatRender(); document.getElementById('chatveld').focus(); }
@@ -1337,11 +1344,12 @@ async function stuur(tekst){
   tekst = (tekst || '').trim(); if (!tekst) return;
   document.getElementById('invoer').value = '';
   document.getElementById('chatveld').value = '';
+  document.getElementById('mVeld').value = '';
   chatOpen(true); chatVoeg('ik', tekst);
-  const log = document.getElementById('chatlog');
+  const log = document.getElementById(MOBIEL ? 'mLog' : 'chatlog');
   const wacht = document.createElement('div');
   wacht.className = 'bub birdy wacht'; wacht.textContent = '…denkt na…';
-  log.appendChild(wacht); log.scrollTop = log.scrollHeight;
+  log.appendChild(wacht); log.scrollTop = log.scrollHeight; if (MOBIEL) mScrollOnder();
   try {
     const r = await fetch('/api/message', { method:'POST',
       headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
@@ -1439,6 +1447,8 @@ function spraak(knop, cb){
   rec.start();
 }
 document.getElementById('invoer').addEventListener('keydown',
+  e => { if (e.key === 'Enter' || e.keyCode === 13) stuur(e.target.value); });
+document.getElementById('mVeld').addEventListener('keydown',
   e => { if (e.key === 'Enter' || e.keyCode === 13) stuur(e.target.value); });
 document.getElementById('chatveld').addEventListener('keydown',
   e => { if (e.key === 'Enter' || e.keyCode === 13) stuur(e.target.value); });
@@ -1959,3 +1969,85 @@ async function gOverzetten(){
   await stuur('Zet je oude Claude-geheugen over naar je geheugenlijst (met einddatums waar iets tijdgebonden is), sla verouderde punten over, en verwijder daarna de oude bestanden.');
   renderGeheugen();
 }
+
+// ── telefoonweergave: acties, boodschappen, chat en geheugen ──────────────
+// Op een smal scherm (of na de knop 📱) een eigen opmaak met een balk onderin.
+// De agenda staat hier bewust niet in: die zie je in de Google Agenda-widget.
+var MOBIEL = false, MVIEW = 'acties';
+function kiesWeergave(w){
+  try { localStorage.setItem('birdy-weergave', w); } catch(e){}
+  location.reload();
+}
+function bepaalWeergave(){
+  let voorkeur = null;
+  try { voorkeur = localStorage.getItem('birdy-weergave'); } catch(e){}
+  const klein = window.matchMedia('(max-width: 700px)').matches;
+  MOBIEL = voorkeur === 'mobiel' || (klein && voorkeur !== 'groot');
+  document.body.classList.toggle('mobiel', MOBIEL);
+  document.body.classList.toggle('klein', klein);
+  if (!MOBIEL) return;
+  // geheugen-paneel hergebruiken in de telefoonweergave
+  document.getElementById('mGeheugen').appendChild(document.getElementById('paneelGeheugen'));
+  try { MVIEW = localStorage.getItem('birdy-mview') || 'acties'; } catch(e){}
+  mKies(MVIEW);
+}
+function mKies(v){
+  MVIEW = v;
+  try { localStorage.setItem('birdy-mview', v); } catch(e){}
+  document.querySelectorAll('#mobiel .mview').forEach(el => el.classList.toggle('actief', el.id === 'm' + v[0].toUpperCase() + v.slice(1)));
+  document.querySelectorAll('#mNav button').forEach(b => b.classList.toggle('actief', b.dataset.v === v));
+  document.getElementById('mInvoer').style.display = v === 'geheugen' ? 'none' : '';
+  if (v === 'geheugen') { document.getElementById('paneelGeheugen').style.display = 'block'; renderGeheugen(); }
+  if (v === 'chat') { chatRender(); }
+  else document.getElementById('mInhoud').scrollTop = 0;
+}
+function mScrollOnder(){ const m = document.getElementById('mInhoud'); if (MVIEW === 'chat') m.scrollTop = m.scrollHeight; }
+function mChatLeeg(){
+  const tips = ['Wat moet er vandaag gebeuren?', 'Zet melk op de boodschappenlijst', 'Wie haalt Evi vrijdag op?'];
+  return `<div class="mtips"><p>Vraag Birdy iets, of tik op een voorbeeld:</p>` +
+    tips.map(t => `<button onclick="stuur(${jsAttr(t)})">${esc(t)}</button>`).join('') + '</div>';
+}
+function mRij(lijst, x){
+  const p = persoonMatch(x.tekst);
+  const id = jsAttr(x.id);
+  return `<li class="mrij"${p ? ` style="--pc:${p.kleur}"` : ''}>` +
+    `<button class="mvink" title="afvinken" onclick="mVink(this, ${id})"></button>` +
+    `<div class="mtekst" onclick="vraagOver('${lijst}', ${id})"><span>${esc(x.tekst)}</span>` +
+    (x.notitie ? `<small>${esc(x.notitie)}</small>` : '') + `</div>` +
+    (lijst === 'acties' ? (x.due ? dueBadge(x.due)
+      : `<button class="mdatum" title="deadline kiezen" onclick="kiesDatum(${id})">📅</button>`) : '') +
+    `</li>`;
+}
+function mVink(knop, id){ vink(knop.closest('li'), id); }
+function mRender(){
+  if (!MOBIEL || !DATA) return;
+  const d = DATA;
+  document.getElementById('mKlok').textContent =
+    new Date().toLocaleDateString('nl-NL', { weekday:'short', day:'numeric', month:'short' });
+  // Birdy's aandachtspunten bovenaan de acties
+  const b = (d.aandacht || {}).birdy || {};
+  const punten = (b.items || []).slice(0, 3);
+  document.getElementById('mAandacht').innerHTML = punten.length
+    ? `<div class="mkaart"><b>💡 Birdy</b><ul>${punten.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>` : '';
+  // acties: Nu · Binnenkort · Later
+  const acties = d.acties || [];
+  const nu = new Date(); nu.setHours(0,0,0,0);
+  const dag = s => Math.round((new Date(s + 'T00:00') - nu) / 86400000);
+  const g = { 'Nu': [], 'Binnenkort': [], 'Later': [] };
+  acties.forEach(x => { if (!x.due) g.Later.push(x); else { const n = dag(x.due); (n <= 0 ? g.Nu : n <= 7 ? g.Binnenkort : g.Later).push(x); } });
+  document.getElementById('mActiesLijst').innerHTML = acties.length
+    ? Object.entries(g).filter(([, v]) => v.length).map(([k, v]) =>
+        `<h3 class="mgroep">${k} <b>${v.length}</b></h3><ul class="mlijst">${v.map(x => mRij('acties', x)).join('')}</ul>`).join('')
+    : '<p class="leeg mleeg">Geen open acties 🎉</p>';
+  document.getElementById('mActiesAf').innerHTML = (d.acties_af || []).map(afRij).join('') || '<li class="leeg">nog niets</li>';
+  const telNu = g.Nu.length;
+  document.getElementById('mNavActies').textContent = telNu || '';
+  // boodschappen
+  const bs = d.boodschappen || [];
+  document.getElementById('mLijstItems').innerHTML = bs.length
+    ? `<ul class="mlijst">${bs.map(x => mRij('boodschappen', x)).join('')}</ul>`
+    : '<p class="leeg mleeg">Lijst is leeg 🎉</p>';
+  document.getElementById('mLijstAf').innerHTML = (d.boodschappen_af || []).map(afRij).join('') || '<li class="leeg">nog niets</li>';
+  document.getElementById('mNavLijst').textContent = bs.length || '';
+}
+bepaalWeergave();

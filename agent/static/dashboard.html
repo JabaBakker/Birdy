@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="/logo-bird.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon-192.png">
@@ -33,6 +33,7 @@
       <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
     </div>
     <div id="klok"></div>
+    <button id="naarMobiel" onclick="kiesWeergave('mobiel')" title="Telefoonweergave">📱</button>
   </header>
   <div class="lay" id="paneelVandaag">
     <aside class="zijbalk">
@@ -72,6 +73,38 @@
   <div id="paneelPlan"></div>
   <div id="paneelGeld" style="display:none"></div>
   <div id="paneelGeheugen" style="display:none"></div>
+</div>
+<!-- telefoonweergave: acties, boodschappen, chat en geheugen; geen agenda (die staat in Google Agenda) -->
+<div id="mobiel">
+  <header id="mKop"><img src="/logo-bird.png" alt="" onerror="this.replaceWith('🐦')"><b>Birdy</b>
+    <span id="mKlok"></span>
+    <button onclick="kiesWeergave('groot')" title="Volledig dashboard">⤢</button></header>
+  <main id="mInhoud">
+    <section id="mActies" class="mview">
+      <div id="mAandacht"></div>
+      <div id="mActiesLijst"><p class="leeg">laden…</p></div>
+      <div class="mtoevoeg"><input placeholder="+ nieuwe actie" enterkeyhint="done" onkeydown="voegToe(event,'acties',this)"></div>
+      <details class="mafgevinkt"><summary>onlangs afgevinkt</summary><ul id="mActiesAf"></ul></details>
+    </section>
+    <section id="mLijst" class="mview">
+      <div class="mtoevoeg"><input placeholder="+ boodschap toevoegen" enterkeyhint="done" onkeydown="voegToe(event,'boodschappen',this)"></div>
+      <div id="mLijstItems"></div>
+      <details class="mafgevinkt"><summary>onlangs afgevinkt</summary><ul id="mLijstAf"></ul></details>
+    </section>
+    <section id="mChat" class="mview"><div id="mLog"></div></section>
+    <section id="mGeheugen" class="mview"></section>
+  </main>
+  <div id="mInvoer">
+    <input id="mVeld" placeholder="Zeg iets tegen Birdy…" enterkeyhint="send">
+    <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
+    <button class="mstuur" onclick="stuur(document.getElementById('mVeld').value)">→</button>
+  </div>
+  <nav id="mNav">
+    <button data-v="acties" onclick="mKies('acties')"><span>⚡</span>Acties<b id="mNavActies"></b></button>
+    <button data-v="lijst" onclick="mKies('lijst')"><span>🛒</span>Lijst<b id="mNavLijst" class="rustig"></b></button>
+    <button data-v="chat" onclick="mKies('chat')"><span>💬</span>Birdy</button>
+    <button data-v="geheugen" onclick="mKies('geheugen')"><span>🧠</span>Geheugen</button>
+  </nav>
 </div>
 <div id="melding"></div>
 <canvas id="plCanvas"></canvas>

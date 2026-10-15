@@ -552,3 +552,87 @@
 /* vijf tabs passen niet op een smalle telefoon: tabbalk mag dan horizontaal schuiven */
 @media (max-width:480px){ #tabs { max-width:100%; overflow-x:auto; scrollbar-width:none; }
   #tabs::-webkit-scrollbar { display:none; } #tabs button { white-space:nowrap; flex:0 0 auto; } }
+
+/* ── telefoonweergave (body.mobiel): acties, lijst, chat, geheugen ── */
+#mobiel, #naarMobiel { display:none; }
+body.klein #naarMobiel { display:inline-block; border:1px solid var(--lijn); background:var(--panel);
+  color:var(--ink); border-radius:10px; padding:.35rem .6rem; font-size:1rem; }
+body.mobiel { padding:0; overflow:hidden; }
+body.mobiel #app, body.mobiel #chatfab, body.mobiel #chat { display:none !important; }
+body.mobiel #mobiel { display:flex; flex-direction:column; position:fixed; inset:0;
+  padding-top:env(safe-area-inset-top); background:var(--bg); }
+#mKop { display:flex; align-items:center; gap:.5rem; padding:.7rem 1rem .5rem; }
+#mKop img { height:1.7rem; }
+#mKop b { color:var(--accent); font-size:1.15rem; }
+#mKlok { color:var(--dim); font-size:.82rem; text-transform:capitalize; margin-left:auto;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#mKop button { border:1px solid var(--lijn); background:var(--panel); color:var(--dim);
+  border-radius:9px; padding:.2rem .5rem; font-size:.95rem; }
+#mInhoud { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
+  padding:.2rem 1rem 1rem; }
+.mview { display:none; }
+.mview.actief { display:block; }
+.mkaart { background:var(--panel); border:1px solid var(--lijn); border-left:3px solid var(--accent);
+  border-radius:14px; padding:.7rem .9rem; margin-bottom:.8rem; }
+.mkaart b { font-size:.85rem; color:var(--accent); }
+.mkaart ul { margin:.3rem 0 0; padding-left:1.1rem; }
+.mkaart li { font-size:.92rem; line-height:1.4; margin:.2rem 0; }
+.mgroep { font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; color:var(--dim);
+  margin:.9rem 0 .3rem; font-weight:600; }
+.mgroep b { background:var(--panel); border-radius:99px; padding:0 .45rem; margin-left:.3rem; }
+.mlijst { list-style:none; padding:0; margin:0; }
+.mrij { display:flex; align-items:center; gap:.75rem; padding:.55rem .1rem;
+  border-bottom:1px solid var(--lijn); min-height:3.1rem; }
+.mvink { flex:0 0 auto; width:1.9rem; height:1.9rem; border-radius:50%;
+  border:2px solid var(--pc, var(--dim)); background:none; padding:0; cursor:pointer; }
+.mvink:active { background:var(--accent); }
+.mrij.gedaan { opacity:.45; }
+.mrij.gedaan .mvink { background:var(--accent); border-color:var(--accent); }
+.mrij.gedaan .mtekst span { text-decoration:line-through; }
+.mtekst { flex:1; min-width:0; }
+.mtekst span { display:block; font-size:1rem; line-height:1.35; }
+.mtekst small { display:block; color:var(--dim); font-size:.8rem; margin-top:.15rem;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mrij .due { flex:0 0 auto; margin-left:0; font-size:.75rem; padding:.15rem .5rem; }
+.mdatum { flex:0 0 auto; border:1px solid var(--lijn); background:none; border-radius:9px;
+  padding:.2rem .45rem; font-size:.9rem; opacity:.6; }
+.mtoevoeg input { width:100%; background:var(--panel); border:1px solid var(--lijn); color:var(--ink);
+  border-radius:12px; padding:.7rem .9rem; font-size:1rem; margin:.8rem 0 .4rem; }
+#mLijst .mtoevoeg input { margin-top:.2rem; }
+.mleeg { margin:1.2rem 0; text-align:center; }
+.mafgevinkt { margin-top:.8rem; }
+.mafgevinkt summary { color:var(--dim); font-size:.85rem; cursor:pointer; }
+.mafgevinkt ul { list-style:none; padding:0; }
+.mafgevinkt li { display:flex; align-items:center; justify-content:space-between; gap:.5rem;
+  padding:.4rem 0; color:var(--dim); text-decoration:line-through; font-size:.9rem; }
+.mafgevinkt .herstelknop { text-decoration:none; }
+#mLog { display:flex; flex-direction:column; gap:.55rem; padding:.4rem 0 .6rem; }
+#mLog .bub { font-size:1rem; max-width:88%; }
+.mtips { color:var(--dim); font-size:.9rem; display:flex; flex-direction:column; gap:.5rem; margin-top:1rem; }
+.mtips button { text-align:left; background:var(--panel); border:1px solid var(--lijn); color:var(--ink);
+  border-radius:12px; padding:.65rem .8rem; font-size:.95rem; }
+#mInvoer { display:flex; gap:.45rem; padding:.55rem .8rem; border-top:1px solid var(--lijn); background:var(--bg); }
+#mInvoer input { flex:1; min-width:0; background:var(--panel); border:1px solid #333a41; border-radius:22px;
+  color:var(--ink); padding:.65rem 1rem; font-size:16px; }  /* 16px: iOS zoomt dan niet in */
+#mInvoer button { border:none; border-radius:50%; width:2.75rem; height:2.75rem; flex:0 0 auto; font-size:1.15rem; }
+#mInvoer .mstuur { background:var(--accent); color:#14171a; }
+#mNav { display:flex; border-top:1px solid var(--lijn); background:var(--panel);
+  padding-bottom:env(safe-area-inset-bottom); }
+#mNav button { flex:1; background:none; border:none; color:var(--dim); font-size:.72rem;
+  padding:.45rem 0 .5rem; display:flex; flex-direction:column; align-items:center; gap:.1rem; position:relative; }
+#mNav button span { font-size:1.35rem; line-height:1.2; filter:grayscale(1); opacity:.7; }
+#mNav button.actief { color:var(--accent); font-weight:600; }
+#mNav button.actief span { filter:none; opacity:1; }
+#mNav button b { position:absolute; top:.25rem; left:calc(50% + .55rem); background:var(--rood); color:#fff;
+  font-size:.62rem; border-radius:99px; padding:0 .32rem; line-height:1.1rem; min-width:1.1rem; }
+#mNav button b:empty { display:none; }
+#mNav button b.rustig { background:#3a4148; color:var(--ink); }
+body.mobiel #melding { left:1rem; right:1rem; max-width:none;
+  bottom:calc(8.2rem + env(safe-area-inset-bottom)); }
+body.mobiel #paneelGeheugen { padding-top:.2rem; }
+body.mobiel .geheugen-kop .notitie { flex-basis:100%; }
+body.mobiel .gnieuw input, body.mobiel .gnieuw label { flex-basis:100%; font-size:16px; }
+body.mobiel .ggrid { grid-template-columns:1fr; }
+/* viewport-fit=cover: op een iPad-beginscherm niet onder de statusbalk schuiven */
+body:not(.mobiel) { padding-top:max(1.1rem, env(safe-area-inset-top));
+  padding-left:max(1.1rem, env(safe-area-inset-left)); padding-right:max(1.1rem, env(safe-area-inset-right)); }
