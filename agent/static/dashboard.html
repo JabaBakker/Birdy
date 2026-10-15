@@ -97,6 +97,7 @@
   </main>
   <div id="mInvoer">
     <input id="mVeld" placeholder="Zeg iets tegen Birdy…" enterkeyhint="send">
+    <button class="bijlageknop" onclick="stuurBijlage()" title="Screenshot of foto sturen">📎</button>
     <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
     <button class="mstuur" onclick="stuur(document.getElementById('mVeld').value)">→</button>
   </div>
@@ -156,6 +157,7 @@
   <div id="chatlog"></div>
   <div id="chatinvoer">
     <input id="chatveld" placeholder="Typ je bericht…" enterkeyhint="send">
+    <button class="bijlageknop" onclick="stuurBijlage()" title="Screenshot of foto sturen">📎</button>
     <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
     <button onclick="stuur(document.getElementById('chatveld').value)">→</button>
   </div>

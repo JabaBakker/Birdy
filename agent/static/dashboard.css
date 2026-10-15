@@ -662,3 +662,6 @@ body:not(.mobiel) { padding-top:max(1.1rem, env(safe-area-inset-top));
 .pkeuzes { margin-top:.8rem; }
 .pkeuzes summary { color:var(--dim); font-size:.85rem; cursor:pointer; }
 .picnic .notitie { color:var(--dim); font-size:.8rem; margin-top:.3rem; }
+
+.bijlageknop { background:var(--panel); border:1px solid #333a41 !important; color:var(--ink); cursor:pointer; }
+#chatinvoer .bijlageknop { border-radius:10px; padding:0 .7rem; font-size:1.05rem; }

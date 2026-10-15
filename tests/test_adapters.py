@@ -664,6 +664,35 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         finally:
             await d.stop()
 
+    async def test_dashboard_bijlage_chat(self):
+        import io
+        from PIL import Image
+        from agent.dashboard import Dashboard
+        brain = FakeBrain()
+        d = Dashboard(Config(dashboard_token="geheim", dashboard_port=18816), brain, asyncio.Lock(), [])
+        await d.start()
+        buf = io.BytesIO(); Image.new("RGB", (3000, 2000), "white").save(buf, "PNG")
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as s:
+                fd = aiohttp.FormData()
+                fd.add_field("bestand", buf.getvalue(), filename="Schermafbeelding 1.png", content_type="image/png")
+                fd.add_field("hint", "zet dit in de agenda")
+                fd.add_field("doel", "chat")
+                fd.add_field("van", "Jaap")
+                async with s.post("http://127.0.0.1:18816/api/upload", data=fd,
+                                  headers={"X-Dashboard-Key": "geheim"}) as r:
+                    self.assertEqual((await r.json())["reply"], "OK-ANTWOORD")
+            fmt = brain.calls[-1][2]
+            self.assertTrue(fmt["photo"].startswith("inbox/photos/") and fmt["photo"].endswith(".jpg"))
+            self.assertIn("zet dit in de agenda", fmt["text"])
+            self.assertEqual(fmt["sender"], "Jaap (via het dashboard)")
+            pad = Config().workspace / fmt["photo"]
+            self.assertLessEqual(max(Image.open(pad).size), 1600)  # verkleind
+            pad.unlink()
+        finally:
+            await d.stop()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

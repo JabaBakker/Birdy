@@ -336,17 +336,55 @@ class Dashboard:
 
     # -- document uploaden vanaf het dashboard (bijv. een polis) → Birdy archiveert ------
 
+    async def _upload_chat(self, naam: str, bestand: bytes, hint: str, van: str) -> web.Response:
+        """Screenshot, foto of pdf uit de chat: Birdy kijkt wat erop staat en doet wat logisch is."""
+        from .slack_adapter import SlackAdapter
+
+        afbeelding = Path(naam).suffix.lower() in (".png", ".jpg", ".jpeg", ".heic", ".heif", ".webp", ".gif")
+        map_ = self.cfg.workspace / "inbox" / ("photos" if afbeelding else "docs")
+        map_.mkdir(parents=True, exist_ok=True)
+        veilig = "".join(c if c.isalnum() or c in "._-" else "_" for c in naam)
+        pad = map_ / f"{datetime.now():%Y%m%d-%H%M%S}_{veilig}"
+        pad.write_bytes(bestand)
+        if afbeelding:  # verkleinen (goedkoper) en HEIC → JPEG, zoals bij Slack
+            pad = await asyncio.to_thread(SlackAdapter._shrink_image, pad)
+        rel = str(pad.relative_to(self.cfg.workspace))
+        wat = "een afbeelding (screenshot of foto)" if afbeelding else "een bestand"
+        tekst = (f"Via het dashboard is {wat} gestuurd: {rel}. "
+                 + (f"Bericht erbij: {hint}" if hint else
+                    "Zonder toelichting: bekijk wat erop staat en doe wat logisch is (taken, afspraken, "
+                    "boodschappen, iets onthouden); twijfel je over de bedoeling, vraag het dan kort."))
+        sender = f"{van} (via het dashboard)" if van else "het dashboard"
+        async with self.work_lock:
+            reply = await self.brain.run("process_message.md", "dashboard-bijlage",
+                                         sender=sender, text=tekst, photo=rel)
+        reply = reply or "Hmm, daar ging iets mis bij het bekijken van je bijlage."
+        self._invalidate(ook_traag=True)
+        self._picnic = None
+        for adapter in self.adapters:
+            if adapter is not self:
+                try:
+                    await adapter.broadcast(f"📎 {van or 'Dashboard'}: {veilig}" + (f" — “{hint}”" if hint else "")
+                                            + f"\n{reply}", kind="chat")
+                except Exception:
+                    log.exception("echo van bijlage mislukt")
+        return web.json_response({"reply": reply})
+
     async def upload(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
             return web.json_response({"error": "geen toegang"}, status=401)
         reader = await request.multipart()
-        bestand, naam, hint = None, "", ""
+        bestand, naam, hint, doel, van = None, "", "", "", ""
         while True:
             deel = await reader.next()
             if deel is None:
                 break
             if deel.name == "hint":
-                hint = (await deel.text())[:300]
+                hint = (await deel.text())[:500]
+            elif deel.name == "doel":
+                doel = (await deel.text()).strip()[:20]
+            elif deel.name == "van":
+                van = "".join(c for c in (await deel.text()) if c.isalpha() or c in " -")[:30].strip()
             elif deel.name == "bestand":
                 naam = Path(deel.filename or "document").name[:120]
                 data = bytearray()
@@ -360,6 +398,8 @@ class Dashboard:
                 bestand = bytes(data)
         if not bestand or not naam:
             return web.json_response({"error": "geen bestand"}, status=400)
+        if doel == "chat":
+            return await self._upload_chat(naam, bestand, hint, van)
         map_ = self.cfg.workspace / "inbox" / "docs"
         map_.mkdir(parents=True, exist_ok=True)
         veilig = "".join(c if c.isalnum() or c in "._-" else "_" for c in naam)

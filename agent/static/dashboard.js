@@ -2155,3 +2155,30 @@ async function picnicOverzetten(){
   await stuur('Zet de boodschappen in Picnic.');
   picnicLaad(true);
 }
+
+// ── bijlage (screenshot, foto, pdf) via de chat: wat in de balk staat gaat mee als vraag ──
+function stuurBijlage(){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*,application/pdf';
+  inp.style.cssText = 'position:fixed;left:-100px;opacity:0';
+  document.body.appendChild(inp);
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; inp.remove();
+    if (!f) return;
+    const veld = document.getElementById(MOBIEL ? 'mVeld' : 'chatveld');
+    const hint = (veld.value || '').trim(); veld.value = '';
+    chatOpen(true); chatVoeg('ik', `📎 ${f.name}${hint ? ' — ' + hint : ''}`);
+    const log = document.getElementById(MOBIEL ? 'mLog' : 'chatlog');
+    const wacht = document.createElement('div');
+    wacht.className = 'bub birdy wacht'; wacht.textContent = '…kijkt ernaar…';
+    log.appendChild(wacht); log.scrollTop = log.scrollHeight; if (MOBIEL) mScrollOnder();
+    const fd = new FormData(); fd.append('bestand', f); fd.append('hint', hint); fd.append('doel', 'chat');
+    try {
+      const r = await fetch('/api/upload', { method:'POST', headers:{ 'X-Dashboard-Key':KEY }, body: fd });
+      const d = await r.json();
+      wacht.remove(); chatVoeg('birdy', d.reply || d.error || 'er ging iets mis');
+      ververs();
+    } catch(e){ wacht.remove(); chatVoeg('birdy', 'Versturen lukte even niet — probeer het zo nog eens.'); }
+  };
+  inp.click();
+}
