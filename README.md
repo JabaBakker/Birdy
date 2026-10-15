@@ -101,6 +101,20 @@ Maak in Todoist twee gedeelde projecten: **Boodschappen** en **Acties**. Zet je
 API-token (Settings → Integrations → Developer) in `TODOIST_API_TOKEN`.
 Test: "voeg kwark toe aan de boodschappen".
 
+
+## Picnic koppelen (boodschappen in het mandje)
+
+Onofficieel (Picnic heeft geen openbare API; dezelfde bibliotheek als Home Assistant).
+Birdy vult alleen het mandje; bestellen doe je zelf in de Picnic-app.
+
+1. Zet `PICNIC_USERNAME` (e-mail) en `PICNIC_PASSWORD` in `.env`, dan
+   `docker compose up -d --force-recreate`.
+2. Eenmalig: `docker compose exec fien python /app/agent/picnic.py koppel` — vraagt zo
+   nodig om de sms-code.
+3. Zeg in de chat "zet de boodschappen in Picnic" (of de knop in de Lijst-tab). Wat Birdy
+   voor het eerst kiest, onthoudt hij als vaste keuze (zichtbaar en te vergeten op het
+   dashboard).
+
 ## Dagelijks gebruik
 
 - Alles wat in je hoofd zit → #birdy in. Tekst, foto of pdf (lijstje, schoolbrief).

@@ -179,6 +179,31 @@ dashboard.
 - Wachten op iemand anders? Zet de actie op de datum waarop je wilt nakijken, met
   `Wachten op …` aan het begin van de tekst.
 
+## Picnic (boodschappen in het mandje)
+
+Het gezin bestelt bij Picnic. Jij vult alleen het **mandje**; bestellen, een
+bezorgmoment kiezen en betalen doet het gezin zelf in de Picnic-app — nooit jij.
+
+- **"Zet de boodschappen in Picnic"** (ook de knop op het dashboard):
+  `python /app/agent/picnic.py overzetten`. Boodschappen met een **vaste keuze** gaan
+  dan vanzelf in het mandje en worden afgevinkt in Todoist. Voor elke regel met `?`
+  (nog geen vaste keuze):
+  1. `python /app/agent/picnic.py zoek "<term>"` en kies het product dat het best past
+     (gewone huismerk-maat, wat het gezin eerder koos, wat in je geheugenlijst staat);
+  2. `python /app/agent/picnic.py voeg <id> --aantal <n>`;
+  3. leg het vast als vaste keuze, zodat het voortaan vanzelf gaat:
+     `python /app/agent/picnic.py kies "<term>" <id> --naam "<productnaam>" --eenheid "<eenheid>"`;
+  4. vink de boodschap af: `python /app/agent/todoist.py done "<tekst>" --lijst boodschappen`.
+  Twijfel je echt tussen producten (smaak, maat, merk), voeg dan niets toe en laat de
+  boodschap staan; noem in je antwoord twee of drie opties met prijs.
+  Antwoord kort: wat erin ging (nieuwe vaste keuzes apart genoemd, zodat het gezin kan
+  bijsturen), wat bleef staan, en het totaal uit `picnic.py mandje`.
+- **"Neem voortaan … voor …"** of "dat was het verkeerde brood": zoek het juiste product
+  en zet de vaste keuze opnieuw met `kies` (vervangt de oude). Vergeten: `vergeet-keuze "<term>"`.
+- **"Wat zit er in het mandje?"**: `python /app/agent/picnic.py mandje` (ook totaal en
+  bezorgmoment).
+- Geeft de tool een melding dat Picnic niet gekoppeld is, zeg dat kort en ga door zonder.
+
 ## Huishoudhandboek & verjaardagen (Google Docs in Drive)
 
 Twee documenten in `20 Huishouden/` die het gezin ook zelf op telefoon of tablet leest

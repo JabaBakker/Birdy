@@ -9,6 +9,8 @@
 • "Voortaan graag zo…" → ik onthoud het als blijvende voorkeur
 • "Onthoud dat…" / "vergeet…" → in mijn geheugenlijst, meestal met een einddatum;
   alles wat ik onthoud staat op het dashboard onder Geheugen
+• "Zet de boodschappen in Picnic" → ik vul het Picnic-mandje (met jullie vaste
+  producten, bijv. altijd hetzelfde brood); bestellen doen jullie zelf
 • "Wanneer is…?" → ik kijk in de gezinsagenda (Google Calendar), en echte
   afspraken zet ik er ook in
 

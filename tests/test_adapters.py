@@ -575,6 +575,73 @@ class Tests(unittest.IsolatedAsyncioTestCase):
                 os.environ["CLAUDE_CONFIG_DIR"] = oud
             tmp.cleanup()
 
+    def test_picnic(self):
+        from agent import picnic
+        picnic._keuzes_pad().unlink(missing_ok=True)
+        self.assertEqual(picnic.term("2x Brood (Jaap)"), ("brood", 2))
+        self.assertEqual(picnic.term("Kwark 3x"), ("kwark", 3))
+        self.assertEqual(picnic.term("2 liter melk"), ("2 liter melk", 1))
+        with self.assertRaises(ValueError):
+            picnic.kies("brood", "x", "Tijgerbrood")
+        picnic.kies("Brood", "s1018231", "Tijgerbrood bruin heel", "800 g")
+        self.assertEqual(picnic.keuzes()["brood"]["id"], "s1018231")
+        # overzetten: vaste keuze → mandje + afvinken; onbekend → blijft staan
+        toegevoegd, afgevinkt = [], []
+        orig = picnic.voeg
+        picnic.voeg = lambda pid, aantal=1: toegevoegd.append((pid, aantal))
+        try:
+            r = picnic.overzetten(lijst=lambda: [{"id": "t1", "tekst": "2x brood"}, {"id": "t2", "tekst": "Kwark"}],
+                                  afvinken=afgevinkt.append)
+        finally:
+            picnic.voeg = orig
+        self.assertEqual(toegevoegd, [("s1018231", 2)])
+        self.assertEqual(afgevinkt, ["t1"])
+        self.assertEqual([u["term"] for u in r["onbekend"]], ["kwark"])
+        # mandje uitlezen met het echte datamodel van de bibliotheek
+        from python_picnic_api2.models import Cart
+        cart = Cart.from_api({"type": "ORDER", "total_count": 3, "total_price": 747, "items": [
+            {"type": "ORDER_LINE", "id": "l1", "display_price": 498, "items": [
+                {"type": "ORDER_ARTICLE", "id": "s1018231", "name": "Tijgerbrood bruin heel",
+                 "unit_quantity": "800 g", "decorators": [{"type": "QUANTITY", "quantity": 2}]}]},
+            {"type": "ORDER_LINE", "id": "l2", "price": 249, "items": [
+                {"type": "ORDER_ARTICLE", "id": "s1", "name": "Halfvolle melk", "unit_quantity": "1 l"}]}]})
+        self.assertEqual(picnic._mandje_regels(cart), [
+            {"id": "s1018231", "naam": "Tijgerbrood bruin heel", "aantal": 2, "eenheid": "800 g", "prijs": 498},
+            {"id": "s1", "naam": "Halfvolle melk", "aantal": 1, "eenheid": "1 l", "prijs": 249}])
+        self.assertEqual(picnic._tijdvak("2026-10-17T18:00:00.000+02:00", "2026-10-17T19:00:00.000+02:00"),
+                         "za 17-10 18:00–19:00")
+        self.assertTrue(picnic.vergeet_keuze("brood"))
+        self.assertFalse(picnic.vergeet_keuze("brood"))
+        picnic._keuzes_pad().unlink(missing_ok=True)
+
+    async def test_dashboard_picnic(self):
+        from agent import picnic
+        from agent.dashboard import Dashboard
+        picnic._keuzes_pad().unlink(missing_ok=True)
+        picnic._token_pad().unlink(missing_ok=True)
+        picnic.kies("brood", "s1018231", "Tijgerbrood bruin heel")
+        d = Dashboard(Config(dashboard_token="geheim", dashboard_port=18814), FakeBrain(), asyncio.Lock(), [])
+        await d.start()
+        url, h = "http://127.0.0.1:18814/api/picnic", {"X-Dashboard-Key": "geheim"}
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url) as r:
+                    self.assertEqual(r.status, 401)
+                async with s.get(url, headers=h) as r:
+                    data = await r.json()
+                    self.assertFalse(data["beschikbaar"])  # geen gegevens in .env: koppeling uit
+                    self.assertEqual([k["term"] for k in data["keuzes"]], ["brood"])
+                async with s.post(url, json={"actie": "vergeet-keuze", "term": "brood"}, headers=h) as r:
+                    self.assertEqual(r.status, 200)
+                async with s.post(url, json={"actie": "vergeet-keuze", "term": "brood"}, headers=h) as r:
+                    self.assertEqual(r.status, 404)
+                async with s.post(url, json={"actie": "bestel"}, headers=h) as r:
+                    self.assertEqual(r.status, 400)
+        finally:
+            await d.stop()
+            picnic._keuzes_pad().unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

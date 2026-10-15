@@ -642,3 +642,23 @@ body:not(.mobiel) { padding-top:max(1.1rem, env(safe-area-inset-top));
   border-radius:99px; padding:.3rem .75rem; font-size:.82rem; }
 .mvernieuw:disabled { color:var(--dim); }
 .mkaart .leeg { margin:.4rem 0 0; font-size:.88rem; }
+
+/* ── Picnic ── */
+.picnic { margin-top:1rem; }
+.pzet { width:100%; border:none; border-radius:12px; padding:.75rem; font-size:1rem; font-weight:600;
+  background:var(--accent); color:#14171a; cursor:pointer; margin-bottom:.8rem; }
+.pmandje { background:var(--panel); border:1px solid var(--lijn); border-radius:14px; padding:.7rem .9rem; }
+.pkop { display:flex; align-items:center; gap:.5rem; }
+.pkop span { color:var(--dim); font-size:.85rem; margin-left:auto; }
+.pmandje ul, .pkeuzes ul { list-style:none; padding:0; margin:.4rem 0; }
+.pmandje li, .pkeuzes li { display:flex; align-items:center; gap:.5rem; padding:.4rem 0;
+  border-top:1px solid var(--lijn); font-size:.92rem; }
+.pmandje li span, .pkeuzes li span { flex:1; min-width:0; }
+.pmandje li small { color:var(--dim); }
+.pknop { border:1px solid var(--lijn); background:var(--bg); color:var(--ink); border-radius:9px;
+  padding:.2rem .55rem; font-size:.85rem; cursor:pointer; flex:0 0 auto; }
+.pbez { font-size:.85rem; margin:.35rem 0 0; }
+.pfout { color:var(--amber); font-size:.9rem; }
+.pkeuzes { margin-top:.8rem; }
+.pkeuzes summary { color:var(--dim); font-size:.85rem; cursor:pointer; }
+.picnic .notitie { color:var(--dim); font-size:.8rem; margin-top:.3rem; }

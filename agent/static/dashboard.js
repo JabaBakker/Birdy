@@ -345,6 +345,7 @@ function renderL2(){
       onkeydown="voegToe(event,'${L2open}',this)"></div>`;
     const af = filterItems(DATA[L2open + '_af'] || [], x => x.tekst);
     if (af.length) html += '<h4>↩ Onlangs afgevinkt</h4><ul>' + af.map(afRij).join('') + '</ul>';
+    if (L2open === 'boodschappen') { html += '<div id="l2Picnic" class="picnic"></div>'; setTimeout(() => picnicLaad(), 0); }
   } else if (L2open === 'verjaardagen'){
     const items = DATA.verjaardagen || [];
     html = '<ul>' + (items.length ? items.map(j =>
@@ -2024,6 +2025,7 @@ function mKies(v){
   document.getElementById('mInvoer').style.display = v === 'geheugen' ? 'none' : '';
   if (v === 'geheugen') { document.getElementById('paneelGeheugen').style.display = 'block'; renderGeheugen(); }
   if (v === 'chat') { chatRender(); }
+  if (v === 'lijst') picnicLaad();
   else document.getElementById('mInhoud').scrollTop = 0;
 }
 function mScrollOnder(){ const m = document.getElementById('mInhoud'); if (MVIEW === 'chat') m.scrollTop = m.scrollHeight; }
@@ -2096,5 +2098,60 @@ function mRender(){
     : '<p class="leeg mleeg">Lijst is leeg 🎉</p>';
   document.getElementById('mLijstAf').innerHTML = (d.boodschappen_af || []).map(afRij).join('') || '<li class="leeg">nog niets</li>';
   document.getElementById('mNavLijst').textContent = bs.length || '';
+  if (MVIEW === 'lijst') picnicLaad();
 }
 bepaalWeergave();
+
+// ── Picnic: mandje, vaste keuzes en "zet lijst in Picnic" (Lijst-tab en boodschappen-blad) ──
+var PICNIC = null;
+async function picnicLaad(ververs){
+  try {
+    const r = await fetch('/api/picnic' + (ververs ? '?ververs=1' : ''), { headers:{ 'X-Dashboard-Key': KEY } });
+    if (!r.ok) return;
+    PICNIC = await r.json();
+  } catch(e){ return; }
+  picnicToon();
+}
+function picnicToon(){
+  const html = picnicBlok();
+  ['mPicnic', 'l2Picnic'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = html; });
+}
+function picnicBlok(){
+  const p = PICNIC;
+  if (!p) return '';
+  const keuzes = p.keuzes || [];
+  const keuzeLijst = keuzes.length ? `<details class="pkeuzes"><summary>⭐ Vaste keuzes (${keuzes.length})</summary><ul>` +
+    keuzes.map(k => `<li><span><b>${esc(k.term)}</b> → ${esc(k.naam)}${k.eenheid ? ' · ' + esc(k.eenheid) : ''}</span>` +
+      `<button class="pknop" title="vaste keuze vergeten" onclick="picnicActie('vergeet-keuze', {term:${jsAttr(k.term)}})">vergeet</button></li>`).join('') +
+    '</ul><p class="notitie">Birdy pakt voor deze boodschappen altijd dit product. Anders? Zeg bijv. “neem voortaan volkoren tijgerbrood”.</p></details>' : '';
+  if (!p.beschikbaar) return keuzeLijst;
+  const aantalBood = ((DATA || {}).boodschappen || []).length;
+  let html = aantalBood ? `<button class="pzet" onclick="picnicOverzetten()">🧺 Zet lijst in Picnic</button>` : '';
+  if (p.fout) return html + `<p class="pfout">⚠ ${esc(p.fout)}</p>` + keuzeLijst;
+  const m = p.mandje || [];
+  html += `<div class="pmandje"><div class="pkop"><b>🧺 Picnic-mandje</b>` +
+    `<span>${p.aantal || 0} art.${p.totaal_tekst ? ' · ' + esc(p.totaal_tekst) : ''}</span>` +
+    `<button class="pknop" title="vernieuwen" onclick="picnicLaad(true)">↻</button></div>` +
+    (p.bezorging ? `<p class="pbez">🚚 Onderweg: ${esc(p.bezorging)}</p>` : '') +
+    (p.bezorgmoment ? `<p class="pbez">📅 Bezorgmoment: ${esc(p.bezorgmoment)}</p>` : '') +
+    (m.length ? '<ul>' + m.map(r => `<li><span>${r.aantal}× ${esc(r.naam)}${r.eenheid ? ` <small>${esc(r.eenheid)}</small>` : ''}</span>` +
+        `<small>${r.prijs != null ? '€ ' + (r.prijs / 100).toFixed(2).replace('.', ',') : ''}</small>` +
+        `<button class="pknop" title="één minder" onclick="picnicActie('haal-weg', {id:${jsAttr(r.id)}})">−</button></li>`).join('') + '</ul>'
+      : '<p class="leeg">Het mandje is leeg.</p>') +
+    '<p class="notitie">Bestellen en betalen doe je zelf in de Picnic-app.</p></div>';
+  return html + keuzeLijst;
+}
+async function picnicActie(actie, extra){
+  try {
+    const r = await fetch('/api/picnic', { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Dashboard-Key':KEY },
+      body: JSON.stringify(Object.assign({ actie }, extra)) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'mislukt');
+  } catch(e){ toon('⚠ ' + (e.message || 'Picnic lukte even niet')); }
+  picnicLaad(true);
+}
+async function picnicOverzetten(){
+  await stuur('Zet de boodschappen in Picnic.');
+  picnicLaad(true);
+}

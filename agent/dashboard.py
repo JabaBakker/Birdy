@@ -24,7 +24,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import agenda, bank, bronnen, financien, geheugen, signalen, todoist
+from . import agenda, bank, bronnen, financien, geheugen, picnic, signalen, todoist
 from .brain import Brain
 from .config import Config
 
@@ -71,6 +71,8 @@ class Dashboard:
         self._geld: dict | None = None  # financieel register (Sheet), eigen cache van 5 min
         self._geld_ts = 0.0
         self._runner: web.AppRunner | None = None
+        self._picnic: dict | None = None  # Picnic-mandje, eigen cache van 1 min
+        self._picnic_ts = 0.0
 
     def _invalidate(self, ook_traag: bool = False) -> None:
         self._cache = None
@@ -96,6 +98,8 @@ class Dashboard:
         app.router.add_get("/api/plan", self.plan_get)
         app.router.add_post("/api/plan", self.plan_post)
         app.router.add_get("/api/overview", self.overview)
+        app.router.add_get("/api/picnic", self.picnic_get)
+        app.router.add_post("/api/picnic", self.picnic_post)
         app.router.add_get("/api/geheugen", self.geheugen_get)
         app.router.add_post("/api/geheugen", self.geheugen_post)
         app.router.add_get("/api/agenda", self.agenda)
@@ -506,6 +510,52 @@ class Dashboard:
             log.warning("planning opslaan mislukt", exc_info=True)
             return web.json_response({"error": "opslaan mislukt"}, status=500)
         return web.json_response({"ok": True, "bijgewerkt": huidig["bijgewerkt"]})
+
+    # -- Picnic (tab Lijst) ---------------------------------------------------
+
+    def _picnic_lees(self) -> dict:
+        keuzes = [dict(v, term=t) for t, v in sorted(picnic.keuzes().items())]
+        if not picnic.geconfigureerd():
+            return {"beschikbaar": False, "keuzes": keuzes}
+        try:
+            return dict(picnic.overzicht(), beschikbaar=True, keuzes=keuzes)
+        except picnic.PicnicNietGekoppeld as e:
+            return {"beschikbaar": True, "fout": str(e), "keuzes": keuzes}
+        except Exception as e:  # noqa: BLE001 - onofficiële API: nooit het dashboard breken
+            log.warning("Picnic lezen mislukt: %s", e)
+            return {"beschikbaar": True, "fout": f"Picnic is even niet bereikbaar ({type(e).__name__}).",
+                    "keuzes": keuzes}
+
+    async def picnic_get(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        if request.query.get("ververs") or not self._picnic or time.time() - self._picnic_ts > 60:
+            self._picnic = await asyncio.to_thread(self._picnic_lees)
+            self._picnic_ts = time.time()
+        return web.json_response(self._picnic, headers={"Cache-Control": "no-store"})
+
+    async def picnic_post(self, request: web.Request) -> web.Response:
+        """{actie: vergeet-keuze, term} of {actie: haal-weg, id}"""
+        if not self._authorized(request):
+            return web.json_response({"error": "geen toegang"}, status=401)
+        try:
+            body = await request.json()
+            assert isinstance(body, dict)
+        except Exception:
+            return web.json_response({"error": "geen geldige json"}, status=400)
+        actie = body.get("actie")
+        try:
+            if actie == "vergeet-keuze":
+                if not await asyncio.to_thread(picnic.vergeet_keuze, str(body.get("term", ""))):
+                    return web.json_response({"error": "geen vaste keuze met die naam"}, status=404)
+            elif actie == "haal-weg":
+                await asyncio.to_thread(picnic.haal_weg, str(body.get("id", "")), 1)
+            else:
+                return web.json_response({"error": "onbekende actie"}, status=400)
+        except Exception as e:  # noqa: BLE001
+            return web.json_response({"error": f"Picnic: {type(e).__name__}"}, status=502)
+        self._picnic = None
+        return web.json_response({"ok": True})
 
     # -- geheugen (tab Geheugen) ---------------------------------------------
 
@@ -931,6 +981,7 @@ class Dashboard:
             )
         reply = reply or "Hm, daar ging iets mis — probeer het nog eens?"
         self._invalidate(ook_traag=True)  # het brein kan ook agenda/documenten hebben aangepast
+        self._picnic = None  # … en het Picnic-mandje
         for adapter in self.adapters:
             if adapter is not self:
                 try:
