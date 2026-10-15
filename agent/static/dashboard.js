@@ -2162,11 +2162,15 @@ function stuurBijlage(){
   inp.type = 'file'; inp.accept = 'image/*,application/pdf';
   inp.style.cssText = 'position:fixed;left:-100px;opacity:0';
   document.body.appendChild(inp);
-  inp.onchange = async () => {
+  inp.onchange = () => {
     const f = inp.files && inp.files[0]; inp.remove();
-    if (!f) return;
-    const veld = document.getElementById(MOBIEL ? 'mVeld' : 'chatveld');
-    const hint = (veld.value || '').trim(); veld.value = '';
+    if (f) stuurBestand(f, document.getElementById(MOBIEL ? 'mVeld' : 'chatveld'));
+  };
+  inp.click();
+}
+async function stuurBestand(f, veld){
+    // veld: het invoerveld waarvan de tekst als vraag meegaat (en daarna leeg)
+    const hint = ((veld && veld.value) || '').trim(); if (veld) veld.value = '';
     chatOpen(true); chatVoeg('ik', `📎 ${f.name}${hint ? ' — ' + hint : ''}`);
     const log = document.getElementById(MOBIEL ? 'mLog' : 'chatlog');
     const wacht = document.createElement('div');
@@ -2179,6 +2183,29 @@ function stuurBijlage(){
       wacht.remove(); chatVoeg('birdy', d.reply || d.error || 'er ging iets mis');
       ververs();
     } catch(e){ wacht.remove(); chatVoeg('birdy', 'Versturen lukte even niet — probeer het zo nog eens.'); }
-  };
-  inp.click();
 }
+// plakken (Ctrl/Cmd+V) van een screenshot in een invoerveld, of een afbeelding naar het venster slepen
+function bijlageUit(lijst){
+  for (const it of Array.from(lijst || [])) {
+    const f = it.kind === 'file' ? it.getAsFile() : (it instanceof File ? it : null);
+    if (f && (f.type.startsWith('image/') || f.type === 'application/pdf')) return f;
+  }
+  return null;
+}
+['invoer', 'chatveld', 'mVeld'].forEach(id => {
+  const veld = document.getElementById(id);
+  veld.addEventListener('paste', e => {
+    const f = bijlageUit(e.clipboardData && e.clipboardData.items);
+    if (!f) return;  // gewone tekst: normaal plakken
+    e.preventDefault();
+    stuurBestand(new File([f], f.name && f.name !== 'image.png' ? f.name : `screenshot-${Date.now()}.png`, { type: f.type }), veld);
+  });
+});
+window.addEventListener('dragover', e => { if (Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault(); });
+window.addEventListener('drop', e => {
+  const f = bijlageUit(e.dataTransfer && e.dataTransfer.files);
+  if (!f) return;
+  e.preventDefault();
+  const veld = document.getElementById(MOBIEL ? 'mVeld' : (document.getElementById('chat').classList.contains('open') ? 'chatveld' : 'invoer'));
+  stuurBestand(f, veld);
+});

@@ -28,7 +28,7 @@
       <button id="tabGeld" onclick="kiesTab('geld')" style="display:none">Geld</button>
     </div>
     <div id="tekstinvoer">
-      <input id="invoer" placeholder="Zeg of typ iets tegen Birdy — “voeg kwark toe aan de boodschappen”">
+      <input id="invoer" placeholder="Zeg of typ iets tegen Birdy, of plak een screenshot (Ctrl/⌘+V)">
       <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
       <button id="stuurknop" onclick="stuur(document.getElementById('invoer').value)">→</button>
     </div>
@@ -156,7 +156,7 @@
     <button onclick="chatOpen(false)" title="Sluiten">✕</button></div>
   <div id="chatlog"></div>
   <div id="chatinvoer">
-    <input id="chatveld" placeholder="Typ je bericht…" enterkeyhint="send">
+    <input id="chatveld" placeholder="Typ je bericht, of plak een screenshot…" enterkeyhint="send">
     <button class="bijlageknop" onclick="stuurBijlage()" title="Screenshot of foto sturen">📎</button>
     <button class="micknop" onclick="spraak(this)" title="Praat tegen Birdy">🎤</button>
     <button onclick="stuur(document.getElementById('chatveld').value)">→</button>
